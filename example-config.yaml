@@ -6,11 +6,10 @@
 type: custom:nas-graph-card
 name: QNAP
 brand: qnap
-theme: standard          # standard | futuristic
-frosted_glass: false     # true = frosted glass overlay
+theme: standard      # standard | futuristic
 max_cpu: 100
 max_memory: 100
-max_temp: 80             # used for gauge % in futuristic mode
+max_temp: 80         # used for gauge arc % in futuristic mode
 entities:
   status: binary_sensor.qnap_online
   cpu: sensor.qnap_cpu_usage
@@ -32,7 +31,6 @@ type: custom:nas-graph-card
 name: Synology
 brand: synology
 theme: futuristic
-frosted_glass: false
 entities:
   status: binary_sensor.synology_online
   cpu: sensor.synology_cpu_usage
@@ -47,41 +45,28 @@ entities:
   storage_free: sensor.synology_volume_free
   uptime: sensor.synology_uptime
 
----
-
-# ── 3. FUTURISTIC + FROSTED GLASS ───────────────────────────────
-type: custom:nas-graph-card
-name: QNAP
-brand: qnap
-theme: futuristic
-frosted_glass: true      # combines neon gauges with glass blur
-entities:
-  # ... same entities as above
-
----
-
-# ── 4. STANDARD + FROSTED GLASS ─────────────────────────────────
-type: custom:nas-graph-card
-name: Synology
-brand: synology
-theme: standard
-frosted_glass: true
-entities:
-  # ... same entities as above
-
 # ─────────────────────────────────────────────────────────────────
-# NOTES
+# FROSTED GLASS
 # ─────────────────────────────────────────────────────────────────
-# • frosted_glass: true applies backdrop-filter blur on top of
-#   whichever theme is active. Works best when your HA theme sets
-#   --ha-card-background to a semi-transparent colour, e.g. the
-#   "Glass" or "Mushroom Glass" themes.
+# There is no frosted_glass option in this card — frosted glass is
+# handled entirely by your HA theme.
 #
-# • network_in / network_out / disk_read / disk_write values are
+# The card never overrides ha-card's background, border, shadow or
+# backdrop-filter. When you switch to a glass theme (e.g. Mushroom
+# Glass, iOS Dark, or any theme that sets --ha-card-background to a
+# semi-transparent value), the card follows automatically.
+#
+# Tile backgrounds inside the card use rgba(0,0,0,0.20/0.30)
+# overlays so they stay legible on both opaque and frosted surfaces.
+#
+# ─────────────────────────────────────────────────────────────────
+# OTHER NOTES
+# ─────────────────────────────────────────────────────────────────
+# • network_in / network_out / disk_read / disk_write are
 #   auto-converted: B/s → KB/s → MB/s as needed.
 #
-# • uptime can be in seconds (integer) or a pre-formatted string.
+# • uptime can be seconds (integer) or a pre-formatted string.
 #
-# • The `status` entity is optional — if omitted, the card always
+# • The `status` entity is optional — omit it and the card always
 #   shows "Online".
 # ─────────────────────────────────────────────────────────────────

@@ -1,6 +1,9 @@
 /**
  * NAS Graph Card for Home Assistant
- * Supports QNAP and Synology — themes: standard | futuristic | frosted
+ * Supports QNAP and Synology — themes: standard | futuristic
+ * Card background, border and frosted-glass are handled entirely by the
+ * active HA theme via ha-card's CSS variables (--ha-card-background,
+ * --ha-card-border-radius, --ha-card-box-shadow, etc.).
  * https://github.com/andrejkurlovic/nas-graph-card
  */
 
@@ -126,8 +129,7 @@ class NasGraphCard extends HTMLElement {
       type: 'custom:nas-graph-card',
       name: 'My NAS',
       brand: 'qnap',
-      theme: 'standard',
-      frosted_glass: false,
+      theme: 'standard',   // standard | futuristic
       entities: {
         status:       'binary_sensor.nas_online',
         cpu:          'sensor.nas_cpu_usage',
@@ -148,13 +150,12 @@ class NasGraphCard extends HTMLElement {
   setConfig(config) {
     if (!config.entities) throw new Error('NAS Graph Card: `entities` is required');
     this._config = {
-      theme:        'standard',
-      name:         'NAS',
-      brand:        'qnap',
-      frosted_glass: false,
-      max_cpu:      100,
-      max_memory:   100,
-      max_temp:     80,
+      theme:     'standard',
+      name:      'NAS',
+      brand:     'qnap',
+      max_cpu:   100,
+      max_memory:100,
+      max_temp:  80,
       ...config,
     };
   }
@@ -237,32 +238,13 @@ class NasGraphCard extends HTMLElement {
     const cfg  = this._config;
     const theme = cfg.theme || 'standard';
     const isFuturistic = theme === 'futuristic';
-    const isFrosted    = cfg.frosted_glass || theme === 'frosted';
     const brand  = (cfg.brand || 'qnap').toLowerCase();
     const online = this._isOnline();
 
-    // ── Theme palette ──────────────────────────────────────────────────────
-    let cardBg, tileBg, cardExtra = '', tileBorder = '';
-
-    if (isFuturistic && isFrosted) {
-      cardBg    = 'var(--ha-card-background, rgba(5, 8, 25, 0.55))';
-      tileBg    = 'rgba(18, 28, 70, 0.55)';
-      cardExtra = 'backdrop-filter:blur(24px) saturate(200%);-webkit-backdrop-filter:blur(24px) saturate(200%);border:1px solid rgba(100,120,255,0.22);';
-      tileBorder= 'border:1px solid rgba(100,120,255,0.15);';
-    } else if (isFrosted) {
-      cardBg    = 'var(--ha-card-background, rgba(14, 20, 42, 0.45))';
-      tileBg    = 'rgba(255,255,255,0.07)';
-      cardExtra = 'backdrop-filter:blur(22px) saturate(180%);-webkit-backdrop-filter:blur(22px) saturate(180%);border:1px solid rgba(255,255,255,0.13);';
-      tileBorder= 'border:1px solid rgba(255,255,255,0.1);';
-    } else if (isFuturistic) {
-      cardBg    = '#050816';
-      tileBg    = '#0a0f28';
-      cardExtra = 'border:1px solid rgba(80,100,200,0.2);box-shadow:0 0 60px rgba(50,80,200,0.1),0 8px 40px rgba(0,0,0,0.7);';
-      tileBorder= 'border:1px solid rgba(60,80,180,0.18);';
-    } else {
-      cardBg = '#0d1524';
-      tileBg = '#162030';
-    }
+    // ── Tile overlay colours (sit on top of whatever ha-card background the theme provides) ──
+    // Using rgba(0,0,0,x) keeps them readable on both opaque dark and frosted-glass backgrounds.
+    const tileBg     = isFuturistic ? 'rgba(0,0,0,0.30)' : 'rgba(0,0,0,0.20)';
+    const tileBorder = isFuturistic ? 'border:1px solid rgba(60,80,180,0.18);' : '';
 
     // ── Values ─────────────────────────────────────────────────────────────
     const cpuV  = parseFloat(this._state('cpu',  '0')) || 0;
@@ -306,14 +288,19 @@ class NasGraphCard extends HTMLElement {
       <style>
         :host { display:block; }
         *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
-        ha-card { background:transparent!important; box-shadow:none!important; border:none!important; }
+
+        /* Let ha-card receive all background / border / shadow / backdrop-filter
+           from the active HA theme — we never override those here. */
+        ha-card {
+          overflow: hidden;
+          ${isFuturistic ? '--ha-card-border-color: rgba(80,100,200,0.25);' : ''}
+        }
 
         .card {
-          background: ${cardBg};
-          ${cardExtra}
-          border-radius: 16px;
+          /* Transparent — ha-card provides the background via the HA theme */
+          background: transparent;
           padding: 16px;
-          color: #fff;
+          color: var(--primary-text-color, #fff);
           font-family: var(--primary-font-family,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif);
         }
 
@@ -443,7 +430,7 @@ if (!window.customCards.some(c => c.type === 'nas-graph-card')) {
   window.customCards.push({
     type:             'nas-graph-card',
     name:             'NAS Graph Card',
-    description:      'Real-time NAS monitoring for QNAP & Synology — sparklines, gauges, frosted glass',
+    description:      'Real-time NAS monitoring for QNAP & Synology — sparklines, circular gauges, theme-aware',
     preview:          true,
     documentationURL: 'https://github.com/andrejkurlovic/nas-graph-card',
   });
