@@ -9,7 +9,7 @@
  * https://github.com/andrejkurlovic/nas-graph-card
  */
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const MAX_HISTORY = 30;
 
 // ── Metric colour palette ───────────────────────────────────────────────────
@@ -30,6 +30,7 @@ const uid = () => `n${++_uid}`;
 // ── Sparkline SVG ───────────────────────────────────────────────────────────
 function sparkSVG(data, strokeColor, w = 200, h = 36) {
   const id = uid();
+  const pad = 2;
   if (!data || data.length < 2) {
     const y = h / 2;
     return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
@@ -38,11 +39,11 @@ function sparkSVG(data, strokeColor, w = 200, h = 36) {
   }
   const min = Math.min(...data);
   const max = Math.max(...data);
-  const range = max - min || 1;
-  const pad = 2;
+  const range = max - min;
+  // When all values are identical map to vertical centre so the line is visible
   const pts = data.map((v, i) => [
     (i / (data.length - 1)) * w,
-    h - pad - ((v - min) / range) * (h - pad * 2),
+    range === 0 ? h / 2 : h - pad - ((v - min) / range) * (h - pad * 2),
   ]);
   const line = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   const area = `M ${pts[0][0].toFixed(1)},${h} ` +
@@ -181,17 +182,17 @@ const _isStorage = u => /^[KMGT]?B$/i.test(u);
 const _has       = (id, ...terms) => terms.some(t => id.includes(t));
 
 const MATCHERS = [
-  { key: 'cpu',          test: (id, u, dc) => _has(id, 'cpu') && u === '%' },
-  { key: 'memory',       test: (id, u, dc) => _has(id, 'memory', 'ram') && u === '%' },
+  { key: 'cpu',          test: (id, u)     => _has(id, 'cpu') && u === '%' },
+  { key: 'memory',       test: (id, u)     => _has(id, 'memory', 'ram') && u === '%' },
   { key: 'temperature',  test: (id, u, dc) => dc === 'temperature' },
-  { key: 'network_in',   test: (id, u, dc) => _has(id, '_rx', 'net_in', 'download', 'network_in') && _isFlow(u) },
-  { key: 'network_out',  test: (id, u, dc) => _has(id, '_tx', 'net_out', 'upload', 'network_out') && _isFlow(u) },
-  { key: 'disk_read',    test: (id, u, dc) => _has(id, 'read', 'disk_r') && _isFlow(u) },
-  { key: 'disk_write',   test: (id, u, dc) => _has(id, 'write', 'disk_w') && _isFlow(u) },
-  { key: 'storage_free', test: (id, u, dc) => _has(id, 'free', 'available', 'volume') && _isStorage(u) },
-  { key: 'uptime',       test: (id, u, dc) => _has(id, 'uptime') },
-  { key: 'disks_total',  test: (id, u, dc) => _has(id, 'disk') && _has(id, 'total', 'count') },
-  { key: 'disks_healthy',test: (id, u, dc) => _has(id, 'disk') && _has(id, 'healthy', 'good', 'normal') },
+  { key: 'network_in',   test: (id, u)     => _has(id, '_rx', 'net_in', 'download', 'network_in') && _isFlow(u) },
+  { key: 'network_out',  test: (id, u)     => _has(id, '_tx', 'net_out', 'upload', 'network_out') && _isFlow(u) },
+  { key: 'disk_read',    test: (id, u)     => _has(id, 'read', 'disk_r') && _isFlow(u) },
+  { key: 'disk_write',   test: (id, u)     => _has(id, 'write', 'disk_w') && _isFlow(u) },
+  { key: 'storage_free', test: (id, u)     => _has(id, 'free', 'available', 'volume') && _isStorage(u) },
+  { key: 'uptime',       test: (id, u, dc) => _has(id, 'uptime', 'up_time') || dc === 'duration' },
+  { key: 'disks_total',  test: (id, u)     => _has(id, 'disk', 'drive') && _has(id, 'total', 'count') },
+  { key: 'disks_healthy',test: (id, u)     => _has(id, 'disk', 'drive') && _has(id, 'healthy', 'good', 'normal', 'ready') },
   { key: 'status',       test: (id, u, dc) => id.startsWith('binary_sensor.') && _has(id, 'online', 'status', 'connected', 'running') },
 ];
 
@@ -366,10 +367,25 @@ class NasGraphCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._history         = {};
-    this._config          = {};
-    this._hass            = null;
-    this._resolvedEntities = {};  // merged: auto-discovered + explicit overrides
+    this._history          = {};
+    this._config           = {};
+    this._hass             = null;
+    this._resolvedEntities = {};
+
+    // Single delegated listener — survives innerHTML re-renders
+    this.shadowRoot.addEventListener('click', e => {
+      const tile = e.target.closest('[data-entity]');
+      if (!tile) return;
+      const entityId = tile.dataset.entity;
+      if (!entityId) return;
+      this._fireMoreInfo(entityId);
+    });
+  }
+
+  _fireMoreInfo(entityId) {
+    this.dispatchEvent(new CustomEvent('hass-more-info', {
+      bubbles: true, composed: true, detail: { entityId },
+    }));
   }
 
   static getConfigElement() {
@@ -455,10 +471,8 @@ class NasGraphCard extends HTMLElement {
       if (isNaN(v)) return;
       if (!this._history[k]) this._history[k] = [];
       const h = this._history[k];
-      if (!h.length || h[h.length - 1] !== v) {
-        h.push(v);
-        if (h.length > MAX_HISTORY) h.shift();
-      }
+      h.push(v);
+      if (h.length > MAX_HISTORY) h.shift();
     });
   }
 
@@ -499,16 +513,60 @@ class NasGraphCard extends HTMLElement {
   }
 
   _fmtUptime() {
-    const raw = this._state('uptime', '?');
-    if (raw === '?' || raw === 'N/A') return raw;
+    const raw = this._state('uptime', null);
+    if (!raw || raw === 'N/A') return '?';
     const v = parseFloat(raw);
-    if (isNaN(v)) return raw;
+    if (isNaN(v)) return raw;  // already formatted string
     const d = Math.floor(v / 86400);
     const h = Math.floor((v % 86400) / 3600);
     const m = Math.floor((v % 3600) / 60);
     if (d > 0) return `${d}d ${h}h`;
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m`;
+  }
+
+  _fmtStorage() {
+    const raw = this._state('storage_free', null);
+    if (!raw || raw === 'N/A') return null;
+    const v = parseFloat(raw);
+    if (isNaN(v)) return raw;
+    const u = (this._unit('storage_free') || '').trim().toUpperCase();
+    const MULT = { B: 1, KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12, PB: 1e15 };
+    const bytes = v * (MULT[u] ?? 1);
+    if (bytes >= 1e15) return `${(bytes / 1e15).toFixed(2)} PB`;
+    if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(2)} TB`;
+    if (bytes >= 1e9)  return `${(bytes / 1e9).toFixed(2)} GB`;
+    if (bytes >= 1e6)  return `${(bytes / 1e6).toFixed(0)} MB`;
+    return `${Math.round(bytes / 1e3)} KB`;
+  }
+
+  _getDiskStats() {
+    // Prefer explicit entities
+    const t = this._state('disks_total', null);
+    const h = this._state('disks_healthy', null);
+    if (t) return { total: t, healthy: h ?? t };
+
+    // Auto-count per-drive health/status sensors from the device
+    const deviceId = this._config.device
+      ? this._resolveDeviceId(this._config.device)
+      : null;
+    if (!deviceId || !this._hass.entities) return null;
+
+    const drives = Object.entries(this._hass.entities).filter(([eid, info]) => {
+      if (info.device_id !== deviceId) return false;
+      const id = eid.toLowerCase();
+      return _has(id, 'drive', 'disk', 'hdd', 'ssd') &&
+             _has(id, 'health', 'status', 'smart', 'temp', 'condition');
+    });
+    if (!drives.length) return null;
+
+    const GOOD = new Set(['ready', 'ok', 'good', 'normal', 'healthy', 'active', 'passed']);
+    const healthy = drives.filter(([eid]) => {
+      const s = (this._hass.states[eid]?.state ?? '').toLowerCase();
+      return GOOD.has(s);
+    }).length;
+
+    return { total: drives.length, healthy };
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -525,14 +583,13 @@ class NasGraphCard extends HTMLElement {
     const tileBorder = isFuturistic ? 'border:1px solid rgba(60,80,180,0.18);' : '';
 
     // ── Values ─────────────────────────────────────────────────────────────
-    const cpuV  = parseFloat(this._state('cpu',  '0')) || 0;
-    const memV  = parseFloat(this._state('memory','0')) || 0;
-    const tmpV  = parseFloat(this._state('temperature','0')) || 0;
+    const cpuV = parseFloat(this._state('cpu',  '0')) || 0;
+    const memV = parseFloat(this._state('memory','0')) || 0;
+    const tmpV = parseFloat(this._state('temperature','0')) || 0;
 
-    const diskTotal   = this._state('disks_total',   '?');
-    const diskHealthy = this._state('disks_healthy',  diskTotal);
-    const storageFree = this._state('storage_free',  '?');
-    const storageUnit = this._unit('storage_free');
+    const diskStats   = this._getDiskStats();
+    const storageFmt  = this._fmtStorage();
+    const uptimeFmt   = this._fmtUptime();
 
     const icon = ICONS[brand] ?? ICONS.generic;
 
@@ -544,18 +601,23 @@ class NasGraphCard extends HTMLElement {
           this._gaugeTile(tmpV, cfg.max_temp, C.temperature, 'Sys Temp', '°C', 'temperature', tileBg, tileBorder),
         ].join('')
       : [
-          this._stdTile('CPU', cpuV, '%', C.cpu, 'cpu', tileBg, tileBorder, isFuturistic),
-          this._stdTile('Memory', memV, '%', C.memory, 'memory', tileBg, tileBorder, isFuturistic),
-          this._stdTile('System Temp', tmpV, '°C', C.temperature, 'temperature', tileBg, tileBorder, isFuturistic),
+          this._stdTile('CPU', cpuV, '%', C.cpu, 'cpu', tileBg, tileBorder),
+          this._stdTile('Memory', memV, '%', C.memory, 'memory', tileBg, tileBorder),
+          this._stdTile('System Temp', tmpV, '°C', C.temperature, 'temperature', tileBg, tileBorder),
         ].join('');
 
-    // ── Mid 4 tiles ────────────────────────────────────────────────────────
-    const midTiles = [
-      this._flowTile('Net In',    this._fmtFlow('network_in'),  C.network_in,  'network_in',  tileBg, tileBorder, isFuturistic),
-      this._flowTile('Net Out',   this._fmtFlow('network_out'), C.network_out, 'network_out', tileBg, tileBorder, isFuturistic),
-      this._flowTile('Disk Read', this._fmtFlow('disk_read'),   C.disk_read,   'disk_read',   tileBg, tileBorder, isFuturistic),
-      this._flowTile('Disk Write',this._fmtFlow('disk_write'),  C.disk_write,  'disk_write',  tileBg, tileBorder, isFuturistic),
-    ].join('');
+    // ── Mid row — only render tiles that have a resolved entity ────────────
+    const MID_METRICS = [
+      { key: 'network_in',  label: 'Net In',     color: C.network_in  },
+      { key: 'network_out', label: 'Net Out',     color: C.network_out },
+      { key: 'disk_read',   label: 'Disk Read',   color: C.disk_read   },
+      { key: 'disk_write',  label: 'Disk Write',  color: C.disk_write  },
+    ].filter(m => this._resolvedEntities[m.key]);
+
+    const midTiles   = MID_METRICS.map(m =>
+      this._flowTile(m.label, this._fmtFlow(m.key), m.color, m.key, tileBg, tileBorder, isFuturistic)
+    ).join('');
+    const midCols    = MID_METRICS.length || 2;
 
     // ── Arrow colour ───────────────────────────────────────────────────────
     const arrowStyle = isFuturistic
@@ -603,7 +665,7 @@ class NasGraphCard extends HTMLElement {
 
         /* ── Grids ── */
         .top-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:10px; }
-        .mid-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:10px; }
+        .mid-grid { display:grid; grid-template-columns:repeat(${midCols},1fr); gap:8px; margin-bottom:10px; }
 
         /* ── Bottom row ── */
         .bot-row {
@@ -635,30 +697,33 @@ class NasGraphCard extends HTMLElement {
           <div class="mid-grid">${midTiles}</div>
 
           <div class="bot-row">
-            <div class="bot-item">
+            ${diskStats ? `
+            <div class="bot-item" ${this._resolvedEntities.disks_healthy ? `data-entity="${this._resolvedEntities.disks_healthy}"` : ''}>
               <span class="bot-ico">💿</span>
               <div>
                 <div class="bot-lbl">Disks</div>
-                <div class="bot-val">${diskHealthy} / ${diskTotal}</div>
+                <div class="bot-val">${diskStats.healthy} / ${diskStats.total}</div>
                 <div class="bot-sub">Healthy</div>
               </div>
-            </div>
-            <div class="bot-item">
+            </div>` : ''}
+            ${storageFmt ? `
+            <div class="bot-item" ${this._resolvedEntities.storage_free ? `data-entity="${this._resolvedEntities.storage_free}"` : ''}>
               <span class="bot-ico">🗄️</span>
               <div>
                 <div class="bot-lbl">Storage</div>
-                <div class="bot-val">${storageFree}${storageUnit ? ' ' + storageUnit : ''}</div>
+                <div class="bot-val">${storageFmt}</div>
                 <div class="bot-sub">Free</div>
               </div>
-            </div>
-            <div class="bot-item">
+            </div>` : ''}
+            ${uptimeFmt !== '?' ? `
+            <div class="bot-item" ${this._resolvedEntities.uptime ? `data-entity="${this._resolvedEntities.uptime}"` : ''}>
               <span class="bot-ico">⏱️</span>
               <div>
                 <div class="bot-lbl">Uptime</div>
-                <div class="bot-val">${this._fmtUptime()}</div>
+                <div class="bot-val">${uptimeFmt}</div>
                 <div class="bot-sub">Up</div>
               </div>
-            </div>
+            </div>` : ''}
             <span class="arrow">›</span>
           </div>
         </div>
@@ -666,10 +731,11 @@ class NasGraphCard extends HTMLElement {
   }
 
   // ── Tile builders ─────────────────────────────────────────────────────────
-  _stdTile(label, value, unit, colors, key, bg, border, isFuturistic) {
-    const hist  = this._history[key] || [value];
-    const spark = sparkSVG(hist, colors.spark, 200, 36);
-    return `<div style="background:${bg};${border}border-radius:12px;padding:12px;overflow:hidden;">
+  _stdTile(label, value, unit, colors, key, bg, border) {
+    const entityId = this._resolvedEntities[key] || '';
+    const hist     = this._history[key] || [value];
+    const spark    = sparkSVG(hist, colors.spark, 200, 36);
+    return `<div data-entity="${entityId}" style="background:${bg};${border}border-radius:12px;padding:12px;overflow:hidden;cursor:${entityId ? 'pointer' : 'default'};">
       <div style="font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:${colors.label};margin-bottom:4px;">${label}</div>
       <div style="font-size:28px;font-weight:700;line-height:1.1;margin-bottom:8px;">${value}<span style="font-size:14px;font-weight:400;opacity:.8;">${unit}</span></div>
       <div style="line-height:0;">${spark}</div>
@@ -677,21 +743,23 @@ class NasGraphCard extends HTMLElement {
   }
 
   _gaugeTile(value, max, colors, label, unit, key, bg, border) {
-    const pct   = value / (max || 100);
-    const gauge = gaugeSVG(pct, colors.spark, label, `${value}${unit}`, 108);
-    const hist  = this._history[key] || [value];
-    const spark = sparkSVG(hist, colors.spark, 120, 24);
-    return `<div style="background:${bg};${border}border-radius:12px;padding:10px 8px 8px;display:flex;flex-direction:column;align-items:center;overflow:hidden;">
+    const entityId = this._resolvedEntities[key] || '';
+    const pct      = value / (max || 100);
+    const gauge    = gaugeSVG(pct, colors.spark, label, `${value}${unit}`, 108);
+    const hist     = this._history[key] || [value];
+    const spark    = sparkSVG(hist, colors.spark, 120, 24);
+    return `<div data-entity="${entityId}" style="background:${bg};${border}border-radius:12px;padding:10px 8px 8px;display:flex;flex-direction:column;align-items:center;overflow:hidden;cursor:${entityId ? 'pointer' : 'default'};">
       ${gauge}
       <div style="width:100%;line-height:0;margin-top:4px;">${spark}</div>
     </div>`;
   }
 
   _flowTile(label, value, colors, key, bg, border, isFuturistic) {
-    const hist  = this._history[key] || [0];
-    const spark = sparkSVG(hist, colors.spark, 120, 26);
-    const glow  = isFuturistic ? `text-shadow:0 0 8px ${colors.label};` : '';
-    return `<div style="background:${bg};${border}border-radius:10px;padding:9px 10px;overflow:hidden;">
+    const entityId = this._resolvedEntities[key] || '';
+    const hist     = this._history[key] || [0];
+    const spark    = sparkSVG(hist, colors.spark, 120, 26);
+    const glow     = isFuturistic ? `text-shadow:0 0 8px ${colors.label};` : '';
+    return `<div data-entity="${entityId}" style="background:${bg};${border}border-radius:10px;padding:9px 10px;overflow:hidden;cursor:${entityId ? 'pointer' : 'default'};">
       <div style="font-size:10px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:${colors.label};${glow}margin-bottom:3px;">${label}</div>
       <div style="font-size:13px;font-weight:700;margin-bottom:5px;white-space:nowrap;">${value}</div>
       <div style="line-height:0;">${spark}</div>
