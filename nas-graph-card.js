@@ -1,9 +1,11 @@
 /**
  * NAS Graph Card for Home Assistant
- * Supports QNAP and Synology — themes: standard | futuristic
- * Card background, border and frosted-glass are handled entirely by the
- * active HA theme via ha-card's CSS variables (--ha-card-background,
- * --ha-card-border-radius, --ha-card-box-shadow, etc.).
+ * Works with any device that exposes sensors: NAS, server, desktop,
+ * container, Raspberry Pi, etc.
+ *
+ * Themes: standard | futuristic
+ * Frosted glass is handled by the active HA theme — the card never
+ * overrides ha-card's background, border, shadow or backdrop-filter.
  * https://github.com/andrejkurlovic/nas-graph-card
  */
 
@@ -91,64 +93,136 @@ function gaugeSVG(pct, color, label, valStr, size = 108) {
   </svg>`;
 }
 
-// ── NAS icons ───────────────────────────────────────────────────────────────
-const ICON_QNAP = `<svg width="46" height="46" viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="5" y="8" width="36" height="30" rx="4" fill="#162030" stroke="#2a4055" stroke-width="1.3"/>
-  <rect x="9" y="13" width="28" height="4.5" rx="1.5" fill="#1d3048" stroke="#304a65" stroke-width="0.8"/>
-  <rect x="9" y="20.5" width="28" height="4.5" rx="1.5" fill="#1d3048" stroke="#304a65" stroke-width="0.8"/>
-  <rect x="9" y="28" width="28" height="4.5" rx="1.5" fill="#1d3048" stroke="#304a65" stroke-width="0.8"/>
-  <circle cx="34" cy="15.25" r="1.6" fill="#06b6d4"/>
-  <circle cx="34" cy="22.75" r="1.6" fill="#06b6d4"/>
-  <circle cx="34" cy="30.25" r="1.6" fill="#3a4a5c"/>
-</svg>`;
+// ── Device icons ─────────────────────────────────────────────────────────────
+const ICONS = {
+  qnap: `<svg width="46" height="46" viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="5" y="8" width="36" height="30" rx="4" fill="#162030" stroke="#2a4055" stroke-width="1.3"/>
+    <rect x="9" y="13" width="28" height="4.5" rx="1.5" fill="#1d3048" stroke="#304a65" stroke-width="0.8"/>
+    <rect x="9" y="20.5" width="28" height="4.5" rx="1.5" fill="#1d3048" stroke="#304a65" stroke-width="0.8"/>
+    <rect x="9" y="28" width="28" height="4.5" rx="1.5" fill="#1d3048" stroke="#304a65" stroke-width="0.8"/>
+    <circle cx="34" cy="15.25" r="1.6" fill="#06b6d4"/>
+    <circle cx="34" cy="22.75" r="1.6" fill="#06b6d4"/>
+    <circle cx="34" cy="30.25" r="1.6" fill="#3a4a5c"/>
+  </svg>`,
 
-const ICON_SYNOLOGY = `<svg width="46" height="46" viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="8" y="5" width="30" height="36" rx="4" fill="#152030" stroke="#283d55" stroke-width="1.3"/>
-  <rect x="12" y="10" width="22" height="3.8" rx="1.3" fill="#1d3048" stroke="#344d68" stroke-width="0.7"/>
-  <rect x="12" y="16.5" width="22" height="3.8" rx="1.3" fill="#1d3048" stroke="#344d68" stroke-width="0.7"/>
-  <rect x="12" y="23" width="22" height="3.8" rx="1.3" fill="#1d3048" stroke="#344d68" stroke-width="0.7"/>
-  <rect x="12" y="29.5" width="22" height="3.8" rx="1.3" fill="#1d3048" stroke="#344d68" stroke-width="0.7"/>
-  <circle cx="14.5" cy="11.9" r="1.1" fill="#22c55e"/>
-  <circle cx="14.5" cy="18.4" r="1.1" fill="#22c55e"/>
-  <circle cx="14.5" cy="24.9" r="1.1" fill="#22c55e"/>
-  <circle cx="14.5" cy="31.4" r="1.1" fill="#3a4a5c"/>
-</svg>`;
+  synology: `<svg width="46" height="46" viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="8" y="5" width="30" height="36" rx="4" fill="#152030" stroke="#283d55" stroke-width="1.3"/>
+    <rect x="12" y="10" width="22" height="3.8" rx="1.3" fill="#1d3048" stroke="#344d68" stroke-width="0.7"/>
+    <rect x="12" y="16.5" width="22" height="3.8" rx="1.3" fill="#1d3048" stroke="#344d68" stroke-width="0.7"/>
+    <rect x="12" y="23" width="22" height="3.8" rx="1.3" fill="#1d3048" stroke="#344d68" stroke-width="0.7"/>
+    <rect x="12" y="29.5" width="22" height="3.8" rx="1.3" fill="#1d3048" stroke="#344d68" stroke-width="0.7"/>
+    <circle cx="14.5" cy="11.9" r="1.1" fill="#22c55e"/>
+    <circle cx="14.5" cy="18.4" r="1.1" fill="#22c55e"/>
+    <circle cx="14.5" cy="24.9" r="1.1" fill="#22c55e"/>
+    <circle cx="14.5" cy="31.4" r="1.1" fill="#3a4a5c"/>
+  </svg>`,
+
+  server: `<svg width="46" height="46" viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="4" y="7" width="38" height="9" rx="2.5" fill="#162030" stroke="#2a4055" stroke-width="1.2"/>
+    <rect x="4" y="19" width="38" height="9" rx="2.5" fill="#162030" stroke="#2a4055" stroke-width="1.2"/>
+    <rect x="4" y="31" width="38" height="9" rx="2.5" fill="#162030" stroke="#2a4055" stroke-width="1.2"/>
+    <circle cx="36" cy="11.5" r="1.4" fill="#22c55e"/>
+    <circle cx="36" cy="23.5" r="1.4" fill="#22c55e"/>
+    <circle cx="36" cy="35.5" r="1.4" fill="#3a4a5c"/>
+    <rect x="8" y="10" width="14" height="3" rx="1" fill="#1d3048" stroke="#304a65" stroke-width="0.6"/>
+    <rect x="8" y="22" width="14" height="3" rx="1" fill="#1d3048" stroke="#304a65" stroke-width="0.6"/>
+    <rect x="8" y="34" width="14" height="3" rx="1" fill="#1d3048" stroke="#304a65" stroke-width="0.6"/>
+  </svg>`,
+
+  desktop: `<svg width="46" height="46" viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="4" y="5" width="38" height="26" rx="3" fill="#162030" stroke="#2a4055" stroke-width="1.2"/>
+    <rect x="7" y="8" width="32" height="20" rx="1.5" fill="#1d3048"/>
+    <rect x="18" y="31" width="10" height="5" rx="1" fill="#1d3048" stroke="#2a4055" stroke-width="1"/>
+    <rect x="13" y="36" width="20" height="2.5" rx="1.2" fill="#162030" stroke="#2a4055" stroke-width="1"/>
+    <circle cx="23" cy="18" r="5" fill="#0a1828" stroke="#304a65" stroke-width="0.8"/>
+    <circle cx="23" cy="18" r="2" fill="#06b6d4" opacity="0.6"/>
+  </svg>`,
+
+  container: `<svg width="46" height="46" viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="6" y="6" width="34" height="34" rx="4" fill="#162030" stroke="#2a4055" stroke-width="1.2"/>
+    <rect x="11" y="11" width="11" height="11" rx="2" fill="#1d3048" stroke="#304a65" stroke-width="0.8"/>
+    <rect x="24" y="11" width="11" height="11" rx="2" fill="#1d3048" stroke="#304a65" stroke-width="0.8"/>
+    <rect x="11" y="24" width="11" height="11" rx="2" fill="#1d3048" stroke="#304a65" stroke-width="0.8"/>
+    <rect x="24" y="24" width="11" height="11" rx="2" fill="#1d3048" stroke="#304a65" stroke-width="0.8"/>
+    <circle cx="16.5" cy="16.5" r="2" fill="#06b6d4" opacity="0.7"/>
+    <circle cx="29.5" cy="16.5" r="2" fill="#22c55e" opacity="0.7"/>
+    <circle cx="16.5" cy="29.5" r="2" fill="#a855f7" opacity="0.7"/>
+    <circle cx="29.5" cy="29.5" r="2" fill="#3a4a5c"/>
+  </svg>`,
+
+  raspberry_pi: `<svg width="46" height="46" viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="7" y="7" width="32" height="32" rx="4" fill="#162030" stroke="#2a4055" stroke-width="1.2"/>
+    <rect x="13" y="13" width="20" height="20" rx="2" fill="#1d3048" stroke="#304a65" stroke-width="0.8"/>
+    <rect x="3" y="14" width="4" height="3" rx="1" fill="#2a4055"/>
+    <rect x="3" y="20" width="4" height="3" rx="1" fill="#2a4055"/>
+    <rect x="39" y="14" width="4" height="3" rx="1" fill="#2a4055"/>
+    <rect x="39" y="20" width="4" height="3" rx="1" fill="#2a4055"/>
+    <rect x="14" y="3" width="5" height="4" rx="1" fill="#2a4055"/>
+    <rect x="27" y="3" width="5" height="4" rx="1" fill="#2a4055"/>
+    <circle cx="23" cy="23" r="4" fill="#c00" opacity="0.8"/>
+    <circle cx="23" cy="23" r="1.5" fill="#ff4444"/>
+  </svg>`,
+
+  generic: `<svg width="46" height="46" viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="5" y="10" width="36" height="26" rx="4" fill="#162030" stroke="#2a4055" stroke-width="1.2"/>
+    <circle cx="23" cy="23" r="8" fill="#1d3048" stroke="#304a65" stroke-width="1"/>
+    <circle cx="23" cy="23" r="3" fill="#06b6d4" opacity="0.7"/>
+    <circle cx="13" cy="15" r="1.5" fill="#22c55e" opacity="0.8"/>
+    <circle cx="33" cy="15" r="1.5" fill="#3a4a5c"/>
+    <rect x="9" y="31" width="8" height="1.5" rx=".75" fill="#304a65"/>
+    <rect x="19" y="31" width="8" height="1.5" rx=".75" fill="#304a65"/>
+    <rect x="29" y="31" width="8" height="1.5" rx=".75" fill="#304a65"/>
+  </svg>`,
+};
+
+// ── Entity auto-discovery matchers ───────────────────────────────────────────
+const _isFlow    = u => /[KMGT]?B\/s|bps/i.test(u);
+const _isStorage = u => /^[KMGT]?B$/i.test(u);
+const _has       = (id, ...terms) => terms.some(t => id.includes(t));
+
+const MATCHERS = [
+  { key: 'cpu',          test: (id, u, dc) => _has(id, 'cpu') && u === '%' },
+  { key: 'memory',       test: (id, u, dc) => _has(id, 'memory', 'ram') && u === '%' },
+  { key: 'temperature',  test: (id, u, dc) => dc === 'temperature' },
+  { key: 'network_in',   test: (id, u, dc) => _has(id, '_rx', 'net_in', 'download', 'network_in') && _isFlow(u) },
+  { key: 'network_out',  test: (id, u, dc) => _has(id, '_tx', 'net_out', 'upload', 'network_out') && _isFlow(u) },
+  { key: 'disk_read',    test: (id, u, dc) => _has(id, 'read', 'disk_r') && _isFlow(u) },
+  { key: 'disk_write',   test: (id, u, dc) => _has(id, 'write', 'disk_w') && _isFlow(u) },
+  { key: 'storage_free', test: (id, u, dc) => _has(id, 'free', 'available', 'volume') && _isStorage(u) },
+  { key: 'uptime',       test: (id, u, dc) => _has(id, 'uptime') },
+  { key: 'disks_total',  test: (id, u, dc) => _has(id, 'disk') && _has(id, 'total', 'count') },
+  { key: 'disks_healthy',test: (id, u, dc) => _has(id, 'disk') && _has(id, 'healthy', 'good', 'normal') },
+  { key: 'status',       test: (id, u, dc) => id.startsWith('binary_sensor.') && _has(id, 'online', 'status', 'connected', 'running') },
+];
 
 // ── Main card class ─────────────────────────────────────────────────────────
 class NasGraphCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._history = {};
-    this._config  = {};
-    this._hass    = null;
+    this._history         = {};
+    this._config          = {};
+    this._hass            = null;
+    this._resolvedEntities = {};  // merged: auto-discovered + explicit overrides
   }
 
   static getStubConfig() {
     return {
-      type: 'custom:nas-graph-card',
-      name: 'My NAS',
-      brand: 'qnap',
-      theme: 'standard',   // standard | futuristic
-      entities: {
-        status:       'binary_sensor.nas_online',
-        cpu:          'sensor.nas_cpu_usage',
-        memory:       'sensor.nas_memory_usage',
-        temperature:  'sensor.nas_system_temp',
-        network_in:   'sensor.nas_network_in',
-        network_out:  'sensor.nas_network_out',
-        disk_read:    'sensor.nas_disk_read',
-        disk_write:   'sensor.nas_disk_write',
-        disks_total:  'sensor.nas_disks_total',
-        disks_healthy:'sensor.nas_disks_healthy',
-        storage_free: 'sensor.nas_storage_free',
-        uptime:       'sensor.nas_uptime',
-      },
+      type:  'custom:nas-graph-card',
+      name:  'My NAS',
+      brand: 'qnap',         // qnap | synology | server | desktop | container | raspberry_pi | generic
+      theme: 'standard',     // standard | futuristic
+      // Option A — point at a HA device and let the card discover entities:
+      device: 'My QNAP NAS', // device name or device_id from HA
+      // Option B — explicit entity mapping (overrides any auto-discovered ones):
+      entities: {},
     };
   }
 
   setConfig(config) {
-    if (!config.entities) throw new Error('NAS Graph Card: `entities` is required');
+    if (!config.device && !config.entities) {
+      throw new Error('NAS Graph Card: provide `device` (for auto-discovery) or `entities`');
+    }
     this._config = {
       theme:     'standard',
       name:      'NAS',
@@ -156,20 +230,61 @@ class NasGraphCard extends HTMLElement {
       max_cpu:   100,
       max_memory:100,
       max_temp:  80,
+      entities:  {},
       ...config,
     };
   }
 
   set hass(hass) {
     this._hass = hass;
+    this._buildResolvedEntities();
     this._pushHistory();
     this._render();
+  }
+
+  // ── Resolve entities: auto-discover from device, then apply explicit overrides ──
+  _buildResolvedEntities() {
+    const discovered = this._config.device ? this._discoverEntities() : {};
+    this._resolvedEntities = { ...discovered, ...this._config.entities };
+  }
+
+  _discoverEntities() {
+    const deviceId = this._resolveDeviceId(this._config.device);
+    if (!deviceId || !this._hass.entities) return {};
+
+    const result = {};
+    for (const [entityId, info] of Object.entries(this._hass.entities)) {
+      if (info.device_id !== deviceId) continue;
+      const state = this._hass.states[entityId];
+      if (!state) continue;
+      const id = entityId.toLowerCase();
+      const u  = state.attributes?.unit_of_measurement ?? '';
+      const dc = state.attributes?.device_class ?? '';
+      for (const { key, test } of MATCHERS) {
+        if (!result[key] && test(id, u, dc)) {
+          result[key] = entityId;
+          break;
+        }
+      }
+    }
+    return result;
+  }
+
+  _resolveDeviceId(ref) {
+    if (!ref || !this._hass.devices) return null;
+    if (this._hass.devices[ref]) return ref;   // already an ID
+    const lower = ref.toLowerCase();
+    for (const [id, dev] of Object.entries(this._hass.devices)) {
+      const name = (dev.name_by_user || dev.name || '').toLowerCase();
+      if (name === lower) return id;
+    }
+    return null;
   }
 
   // ── History tracking ──────────────────────────────────────────────────────
   _pushHistory() {
     ['cpu','memory','temperature','network_in','network_out','disk_read','disk_write'].forEach(k => {
-      const id = this._config.entities?.[k];
+      const id = this._resolvedEntities[k];
       if (!id) return;
       const st = this._hass.states[id];
       if (!st) return;
@@ -186,19 +301,19 @@ class NasGraphCard extends HTMLElement {
 
   // ── State helpers ─────────────────────────────────────────────────────────
   _state(key, fallback = 'N/A') {
-    const id = this._config.entities?.[key];
+    const id = this._resolvedEntities[key];
     if (!id) return fallback;
     const s = this._hass?.states[id]?.state;
     return (!s || s === 'unavailable' || s === 'unknown') ? fallback : s;
   }
 
   _unit(key) {
-    const id = this._config.entities?.[key];
+    const id = this._resolvedEntities[key];
     return this._hass?.states[id]?.attributes?.unit_of_measurement ?? '';
   }
 
   _isOnline() {
-    const id = this._config.entities?.status;
+    const id = this._resolvedEntities.status;
     if (!id) return true;
     return this._hass?.states[id]?.state === 'on';
   }
@@ -256,7 +371,7 @@ class NasGraphCard extends HTMLElement {
     const storageFree = this._state('storage_free',  '?');
     const storageUnit = this._unit('storage_free');
 
-    const icon = brand === 'synology' ? ICON_SYNOLOGY : ICON_QNAP;
+    const icon = ICONS[brand] ?? ICONS.generic;
 
     // ── Top 3 tiles ────────────────────────────────────────────────────────
     const topTiles = isFuturistic

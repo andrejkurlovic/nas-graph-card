@@ -2,71 +2,74 @@
 #  NAS Graph Card — example Lovelace configuration
 # ─────────────────────────────────────────────────────────────────
 
-# ── 1. STANDARD (Vibrant) — QNAP ────────────────────────────────
+# ── 1. AUTO-DISCOVERY (recommended) ─────────────────────────────
+# Just provide the HA device name. The card scans all entities
+# belonging to that device and maps them automatically.
 type: custom:nas-graph-card
 name: QNAP
-brand: qnap
+brand: qnap          # qnap | synology | server | desktop | container | raspberry_pi | generic
 theme: standard      # standard | futuristic
+device: "My QNAP NAS"  # device name as shown in HA Settings → Devices
 max_cpu: 100
 max_memory: 100
 max_temp: 80         # used for gauge arc % in futuristic mode
-entities:
-  status: binary_sensor.qnap_online
-  cpu: sensor.qnap_cpu_usage
-  memory: sensor.qnap_memory_usage
-  temperature: sensor.qnap_system_temperature
-  network_in: sensor.qnap_network_rx
-  network_out: sensor.qnap_network_tx
-  disk_read: sensor.qnap_disk_read
-  disk_write: sensor.qnap_disk_write
-  disks_total: sensor.qnap_total_disks
-  disks_healthy: sensor.qnap_healthy_disks
-  storage_free: sensor.qnap_volume_free
-  uptime: sensor.qnap_uptime
 
 ---
 
-# ── 2. FUTURISTIC (Neon) — Synology ─────────────────────────────
+# ── 2. AUTO-DISCOVERY + OVERRIDE ────────────────────────────────
+# Let the card discover most entities but pin a specific one.
 type: custom:nas-graph-card
 name: Synology
 brand: synology
 theme: futuristic
+device: "Synology DS923+"
 entities:
-  status: binary_sensor.synology_online
-  cpu: sensor.synology_cpu_usage
-  memory: sensor.synology_memory_usage
-  temperature: sensor.synology_temperature
-  network_in: sensor.synology_network_rx
-  network_out: sensor.synology_network_tx
-  disk_read: sensor.synology_disk_read
-  disk_write: sensor.synology_disk_write
-  disks_total: sensor.synology_total_disks
-  disks_healthy: sensor.synology_healthy_disks
-  storage_free: sensor.synology_volume_free
-  uptime: sensor.synology_uptime
+  # override only the ones auto-discovery gets wrong:
+  storage_free: sensor.synology_volume_1_free_space
+
+---
+
+# ── 3. FULLY MANUAL (no device needed) ──────────────────────────
+type: custom:nas-graph-card
+name: QNAP
+brand: qnap
+theme: standard
+entities:
+  status:        binary_sensor.qnap_online
+  cpu:           sensor.qnap_cpu_usage
+  memory:        sensor.qnap_memory_usage
+  temperature:   sensor.qnap_system_temperature
+  network_in:    sensor.qnap_network_rx
+  network_out:   sensor.qnap_network_tx
+  disk_read:     sensor.qnap_disk_read
+  disk_write:    sensor.qnap_disk_write
+  disks_total:   sensor.qnap_total_disks
+  disks_healthy: sensor.qnap_healthy_disks
+  storage_free:  sensor.qnap_volume_free
+  uptime:        sensor.qnap_uptime
+
+---
+
+# ── 4. SERVER / DESKTOP / CONTAINER / RASPBERRY PI ──────────────
+type: custom:nas-graph-card
+name: Home Server
+brand: server        # changes the icon; layout stays the same
+theme: futuristic
+device: "My Home Server"  # any HA device with CPU/memory/network sensors
 
 # ─────────────────────────────────────────────────────────────────
 # FROSTED GLASS
 # ─────────────────────────────────────────────────────────────────
-# There is no frosted_glass option in this card — frosted glass is
-# handled entirely by your HA theme.
-#
-# The card never overrides ha-card's background, border, shadow or
-# backdrop-filter. When you switch to a glass theme (e.g. Mushroom
-# Glass, iOS Dark, or any theme that sets --ha-card-background to a
-# semi-transparent value), the card follows automatically.
-#
-# Tile backgrounds inside the card use rgba(0,0,0,0.20/0.30)
-# overlays so they stay legible on both opaque and frosted surfaces.
+# There is no frosted_glass option — the card never overrides
+# ha-card's background, border, shadow or backdrop-filter.
+# Switch your HA theme to any glass/frosted variant and the card
+# follows automatically.
 #
 # ─────────────────────────────────────────────────────────────────
 # OTHER NOTES
 # ─────────────────────────────────────────────────────────────────
-# • network_in / network_out / disk_read / disk_write are
-#   auto-converted: B/s → KB/s → MB/s as needed.
-#
+# • brand controls the icon only; it does not affect entity matching.
+# • network_in/out, disk_read/write are auto-converted B/s→KB/s→MB/s.
 # • uptime can be seconds (integer) or a pre-formatted string.
-#
-# • The `status` entity is optional — omit it and the card always
-#   shows "Online".
+# • The `status` binary_sensor is optional; omit it → always "Online".
 # ─────────────────────────────────────────────────────────────────
