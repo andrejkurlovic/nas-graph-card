@@ -195,6 +195,172 @@ const MATCHERS = [
   { key: 'status',       test: (id, u, dc) => id.startsWith('binary_sensor.') && _has(id, 'online', 'status', 'connected', 'running') },
 ];
 
+// ── GUI editor ───────────────────────────────────────────────────────────────
+
+const EDITOR_SCHEMA = [
+  { name: 'name',  label: 'Card Name', selector: { text: {} } },
+  {
+    name: 'brand', label: 'Device Icon',
+    selector: {
+      select: {
+        options: [
+          { value: 'qnap',         label: 'QNAP NAS'      },
+          { value: 'synology',     label: 'Synology NAS'  },
+          { value: 'server',       label: 'Server'        },
+          { value: 'desktop',      label: 'Desktop / PC'  },
+          { value: 'container',    label: 'Container'     },
+          { value: 'raspberry_pi', label: 'Raspberry Pi'  },
+          { value: 'generic',      label: 'Generic Device'},
+        ],
+      },
+    },
+  },
+  {
+    name: 'theme', label: 'Visual Style',
+    selector: {
+      select: {
+        options: [
+          { value: 'standard',   label: 'Standard (Vibrant)' },
+          { value: 'futuristic', label: 'Futuristic (Neon)'  },
+        ],
+      },
+    },
+  },
+  { name: 'device',      label: 'HA Device (auto-discovers all sensors)',  selector: { device: {} } },
+  { name: 'max_cpu',     label: 'CPU gauge max (%)',                        selector: { number: { min: 1, max: 200, step: 1, mode: 'box' } } },
+  { name: 'max_memory',  label: 'Memory gauge max (%)',                     selector: { number: { min: 1, max: 200, step: 1, mode: 'box' } } },
+  { name: 'max_temp',    label: 'Temperature gauge max (°)',                selector: { number: { min: 1, max: 150, step: 1, mode: 'box' } } },
+];
+
+const ENTITY_FIELDS = [
+  { key: 'status',        label: 'Online / Offline status', domain: 'binary_sensor' },
+  { key: 'cpu',           label: 'CPU Usage (%)',           domain: 'sensor' },
+  { key: 'memory',        label: 'Memory Usage (%)',        domain: 'sensor' },
+  { key: 'temperature',   label: 'System Temperature',      domain: 'sensor' },
+  { key: 'network_in',    label: 'Network In',              domain: 'sensor' },
+  { key: 'network_out',   label: 'Network Out',             domain: 'sensor' },
+  { key: 'disk_read',     label: 'Disk Read Speed',         domain: 'sensor' },
+  { key: 'disk_write',    label: 'Disk Write Speed',        domain: 'sensor' },
+  { key: 'disks_total',   label: 'Total Disks',             domain: 'sensor' },
+  { key: 'disks_healthy', label: 'Healthy Disks',           domain: 'sensor' },
+  { key: 'storage_free',  label: 'Storage Free',            domain: 'sensor' },
+  { key: 'uptime',        label: 'Uptime',                  domain: 'sensor' },
+];
+
+class NasGraphCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._config    = {};
+    this._hass      = null;
+    this._mainForm  = null;
+    this._pickerMap = {};
+  }
+
+  connectedCallback() {
+    if (!this.shadowRoot.children.length) this._buildDOM();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this._mainForm) this._mainForm.hass = hass;
+    for (const p of Object.values(this._pickerMap)) p.hass = hass;
+  }
+
+  setConfig(config) {
+    this._config = { ...config };
+    if (this._mainForm) {
+      this._mainForm.data = this._flatData();
+      for (const f of ENTITY_FIELDS) {
+        if (this._pickerMap[f.key]) this._pickerMap[f.key].value = config.entities?.[f.key] ?? '';
+      }
+    }
+  }
+
+  _flatData() {
+    // ha-form works on a flat object; entities are handled by the separate pickers below
+    const { entities: _e, ...flat } = this._config;
+    return flat;
+  }
+
+  _buildDOM() {
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; }
+        .section-title {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--secondary-text-color);
+          text-transform: uppercase;
+          letter-spacing: .5px;
+          padding: 16px 4px 8px;
+          border-top: 1px solid var(--divider-color);
+          margin-top: 4px;
+        }
+        .hint {
+          font-size: 12px;
+          color: var(--secondary-text-color);
+          padding: 2px 4px 12px;
+        }
+        .entity-row { margin-bottom: 8px; }
+      </style>
+      <div id="main-form-slot"></div>
+      <p class="hint">
+        Pick a <strong>HA Device</strong> above and all sensors are discovered automatically.
+        Use the overrides below only when auto-discovery picks the wrong entity.
+      </p>
+      <div class="section-title">Entity overrides (optional)</div>
+      <div id="entity-slot"></div>`;
+
+    // ── Main ha-form ──────────────────────────────────────────────────────
+    const form = document.createElement('ha-form');
+    form.hass = this._hass;
+    form.data = this._flatData();
+    form.schema = EDITOR_SCHEMA;
+    form.computeLabel = s => s.label ?? s.name;
+    form.addEventListener('value-changed', e => {
+      this._config = { ...this._config, ...e.detail.value };
+      this._fire();
+    });
+    this.shadowRoot.querySelector('#main-form-slot').appendChild(form);
+    this._mainForm = form;
+
+    // ── Entity pickers ────────────────────────────────────────────────────
+    const slot = this.shadowRoot.querySelector('#entity-slot');
+    for (const field of ENTITY_FIELDS) {
+      const row = document.createElement('div');
+      row.className = 'entity-row';
+      const picker = document.createElement('ha-entity-picker');
+      picker.hass = this._hass;
+      picker.label = field.label;
+      picker.value = this._config.entities?.[field.key] ?? '';
+      picker.includeDomains = [field.domain];
+      picker.allowCustomEntity = true;
+      picker.style.width = '100%';
+      picker.addEventListener('value-changed', e => {
+        const entities = { ...(this._config.entities ?? {}) };
+        const v = e.detail.value;
+        if (v) entities[field.key] = v; else delete entities[field.key];
+        this._config = { ...this._config, entities };
+        this._fire();
+      });
+      row.appendChild(picker);
+      slot.appendChild(row);
+      this._pickerMap[field.key] = picker;
+    }
+  }
+
+  _fire() {
+    this.dispatchEvent(new CustomEvent('config-changed', {
+      detail: { config: { ...this._config } },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+}
+
+customElements.define('nas-graph-card-editor', NasGraphCardEditor);
+
 // ── Main card class ─────────────────────────────────────────────────────────
 class NasGraphCard extends HTMLElement {
   constructor() {
@@ -206,23 +372,20 @@ class NasGraphCard extends HTMLElement {
     this._resolvedEntities = {};  // merged: auto-discovered + explicit overrides
   }
 
+  static getConfigElement() {
+    return document.createElement('nas-graph-card-editor');
+  }
+
   static getStubConfig() {
     return {
-      type:  'custom:nas-graph-card',
       name:  'My NAS',
-      brand: 'qnap',         // qnap | synology | server | desktop | container | raspberry_pi | generic
-      theme: 'standard',     // standard | futuristic
-      // Option A — point at a HA device and let the card discover entities:
-      device: 'My QNAP NAS', // device name or device_id from HA
-      // Option B — explicit entity mapping (overrides any auto-discovered ones):
+      brand: 'qnap',
+      theme: 'standard',
       entities: {},
     };
   }
 
   setConfig(config) {
-    if (!config.device && !config.entities) {
-      throw new Error('NAS Graph Card: provide `device` (for auto-discovery) or `entities`');
-    }
     this._config = {
       theme:     'standard',
       name:      'NAS',
