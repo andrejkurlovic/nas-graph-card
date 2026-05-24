@@ -1,0 +1,87 @@
+# ─────────────────────────────────────────────────────────────────
+#  NAS Graph Card — example Lovelace configuration
+# ─────────────────────────────────────────────────────────────────
+
+# ── 1. STANDARD (Vibrant) — QNAP ────────────────────────────────
+type: custom:nas-graph-card
+name: QNAP
+brand: qnap
+theme: standard          # standard | futuristic
+frosted_glass: false     # true = frosted glass overlay
+max_cpu: 100
+max_memory: 100
+max_temp: 80             # used for gauge % in futuristic mode
+entities:
+  status: binary_sensor.qnap_online
+  cpu: sensor.qnap_cpu_usage
+  memory: sensor.qnap_memory_usage
+  temperature: sensor.qnap_system_temperature
+  network_in: sensor.qnap_network_rx
+  network_out: sensor.qnap_network_tx
+  disk_read: sensor.qnap_disk_read
+  disk_write: sensor.qnap_disk_write
+  disks_total: sensor.qnap_total_disks
+  disks_healthy: sensor.qnap_healthy_disks
+  storage_free: sensor.qnap_volume_free
+  uptime: sensor.qnap_uptime
+
+---
+
+# ── 2. FUTURISTIC (Neon) — Synology ─────────────────────────────
+type: custom:nas-graph-card
+name: Synology
+brand: synology
+theme: futuristic
+frosted_glass: false
+entities:
+  status: binary_sensor.synology_online
+  cpu: sensor.synology_cpu_usage
+  memory: sensor.synology_memory_usage
+  temperature: sensor.synology_temperature
+  network_in: sensor.synology_network_rx
+  network_out: sensor.synology_network_tx
+  disk_read: sensor.synology_disk_read
+  disk_write: sensor.synology_disk_write
+  disks_total: sensor.synology_total_disks
+  disks_healthy: sensor.synology_healthy_disks
+  storage_free: sensor.synology_volume_free
+  uptime: sensor.synology_uptime
+
+---
+
+# ── 3. FUTURISTIC + FROSTED GLASS ───────────────────────────────
+type: custom:nas-graph-card
+name: QNAP
+brand: qnap
+theme: futuristic
+frosted_glass: true      # combines neon gauges with glass blur
+entities:
+  # ... same entities as above
+
+---
+
+# ── 4. STANDARD + FROSTED GLASS ─────────────────────────────────
+type: custom:nas-graph-card
+name: Synology
+brand: synology
+theme: standard
+frosted_glass: true
+entities:
+  # ... same entities as above
+
+# ─────────────────────────────────────────────────────────────────
+# NOTES
+# ─────────────────────────────────────────────────────────────────
+# • frosted_glass: true applies backdrop-filter blur on top of
+#   whichever theme is active. Works best when your HA theme sets
+#   --ha-card-background to a semi-transparent colour, e.g. the
+#   "Glass" or "Mushroom Glass" themes.
+#
+# • network_in / network_out / disk_read / disk_write values are
+#   auto-converted: B/s → KB/s → MB/s as needed.
+#
+# • uptime can be in seconds (integer) or a pre-formatted string.
+#
+# • The `status` entity is optional — if omitted, the card always
+#   shows "Online".
+# ─────────────────────────────────────────────────────────────────

@@ -1,0 +1,6 @@
+{
+  "name": "NAS Graph Card",
+  "render_readme": true,
+  "filename": "nas-graph-card.js",
+  "homeassistant": "2023.1.0"
+}
