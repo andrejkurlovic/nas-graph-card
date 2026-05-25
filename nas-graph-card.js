@@ -1,5 +1,5 @@
 /**
- * NAS Graph Card for Home Assistant  v1.4.0
+ * NAS Graph Card for Home Assistant  v1.5.0
  * Works with any device that exposes sensors: NAS, server, desktop,
  * container, Raspberry Pi, etc.
  *
@@ -9,7 +9,7 @@
  * https://github.com/andrejkurlovic/nas-graph-card
  */
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const MAX_HISTORY = 30;
 
 // ── Metric colour palette ───────────────────────────────────────────────────
@@ -172,9 +172,9 @@ const MATCHERS = [
   { key: 'temperature',  test: (id, u, dc) => dc === 'temperature' },
   { key: 'network_in',   test: (id, u)     => _has(id, '_rx', 'net_in', 'download', 'network_in') && _isFlow(u) },
   { key: 'network_out',  test: (id, u)     => _has(id, '_tx', 'net_out', 'upload', 'network_out') && _isFlow(u) },
-  { key: 'disk_read',    test: (id, u)     => _has(id, 'disk_r', 'read_') && _isFlow(u) },
-  { key: 'disk_write',   test: (id, u)     => _has(id, 'disk_w', 'write_') && _isFlow(u) },
-  { key: 'storage_free', test: (id, u)     => _has(id, 'free', 'available') && _isStorage(u) },
+  { key: 'disk_read',    test: (id, u)     => _has(id, 'read', 'disk_r') && _isFlow(u) },
+  { key: 'disk_write',   test: (id, u)     => _has(id, 'write', 'disk_w') && _isFlow(u) },
+  { key: 'storage_free', test: (id, u)     => _has(id, 'free', 'available', 'volume') && _isStorage(u) },
   { key: 'uptime',       test: (id, u, dc) => _has(id, 'uptime', 'up_time', 'boot') || dc === 'duration' },
   { key: 'disks_total',  test: (id, u)     => _has(id, 'disk', 'drive') && _has(id, 'total', 'count') },
   { key: 'disks_healthy',test: (id, u)     => _has(id, 'disk', 'drive') && _has(id, 'healthy', 'good', 'normal', 'ready') },
@@ -373,6 +373,9 @@ class NasGraphCardEditor extends HTMLElement {
 
 customElements.define('nas-graph-card-editor', NasGraphCardEditor);
 
+// ── Keys that have sparklines and should navigate to history on tap ──────────
+const HISTORY_KEYS = new Set(['cpu','memory','temperature','network_in','network_out','disk_read','disk_write']);
+
 // ── Main card ──────────────────────────────────────────────────────────────────
 class NasGraphCard extends HTMLElement {
   constructor() {
@@ -384,6 +387,7 @@ class NasGraphCard extends HTMLElement {
     this._resolvedEntities = {};
     this._lastHistoryFetch = 0;
     this._fetchingHistory  = false;
+    this._renderKey        = null;
 
     // ── Delegated tap / hold / double-tap ─────────────────────────────────
     let _holdTimer = null, _holdFired = false, _tapCount = 0, _tapTimer = null;
@@ -416,22 +420,39 @@ class NasGraphCard extends HTMLElement {
     });
   }
 
+  // ── History navigation action ─────────────────────────────────────────────
+  _historyNav(entityId) {
+    if (!entityId) return { action: 'none' };
+    const hours = parseInt(String(this._config.history_hours), 10) || 1;
+    const end   = new Date();
+    const start = new Date(end.getTime() - hours * 3_600_000);
+    return {
+      action: 'navigate',
+      navigation_path: `/history?entity_id=${entityId}&start_date=${start.toISOString().slice(0, 19)}&end_date=${end.toISOString().slice(0, 19)}`,
+    };
+  }
+
   _dispatchAction(el, actionType) {
     const key      = el.dataset.action;
     const entityId = el.dataset.entity || undefined;
     const sa       = this._config.actions?.[key] ?? {};
-    const def      = actionType === 'tap' ? (entityId ? 'more-info' : 'none') : 'none';
-    const actionCfg = sa[`${actionType}_action`] ?? { action: def };
+
+    // Default tap for sparkline tiles: navigate to history with the same time window
+    const defTap = HISTORY_KEYS.has(key) && entityId
+      ? this._historyNav(entityId)
+      : { action: entityId ? 'more-info' : 'none' };
+
+    const tap  = sa.tap_action        ?? defTap;
+    const hold = sa.hold_action       ?? { action: 'none' };
+    const dbl  = sa.double_tap_action ?? { action: 'none' };
+
+    const actionCfg = actionType === 'tap' ? tap : actionType === 'hold' ? hold : dbl;
     if (!actionCfg || actionCfg.action === 'none') return;
+
     this.dispatchEvent(new CustomEvent('hass-action', {
       bubbles: true, composed: true,
       detail: {
-        config: {
-          entity:            entityId,
-          tap_action:        sa.tap_action        ?? { action: entityId ? 'more-info' : 'none' },
-          hold_action:       sa.hold_action       ?? { action: 'none' },
-          double_tap_action: sa.double_tap_action ?? { action: 'none' },
-        },
+        config: { entity: entityId, tap_action: tap, hold_action: hold, double_tap_action: dbl },
         action: actionType,
       },
     }));
@@ -460,6 +481,7 @@ class NasGraphCard extends HTMLElement {
     if (String(config.history_hours ?? '1') !== String(prevHours ?? '')) {
       this._lastHistoryFetch = 0;
       this._history = {};
+      this._renderKey = null;
     }
   }
 
@@ -583,7 +605,6 @@ class NasGraphCard extends HTMLElement {
   _isVisible(key) {
     const vm = this._config.visible_metrics;
     if (!vm || !vm.length) return true;
-    // Map internal keys to user-facing visible_metrics keys
     const vmKey = { disks_healthy: 'disks', storage_free: 'storage' }[key] ?? key;
     return vm.includes(vmKey);
   }
@@ -608,15 +629,13 @@ class NasGraphCard extends HTMLElement {
     const raw = this._state('uptime', null);
     if (!raw || raw === 'N/A') return null;
     const v = parseFloat(raw);
-    if (isNaN(v)) return String(raw).trim() || null; // pre-formatted string
+    if (isNaN(v)) return String(raw).trim() || null;
 
-    // Convert to seconds based on unit_of_measurement
     const u = this._unit('uptime').toLowerCase();
     let secs = v;
-    if      (u === 'days' || u === 'd')              secs = v * 86400;
-    else if (u === 'hours' || u === 'h' || u === 'hr') secs = v * 3600;
+    if      (u === 'days' || u === 'd')                  secs = v * 86400;
+    else if (u === 'hours' || u === 'h' || u === 'hr')   secs = v * 3600;
     else if (u === 'minutes' || u === 'min' || u === 'm') secs = v * 60;
-    // else assume seconds
 
     const d = Math.floor(secs / 86400);
     const h = Math.floor((secs % 86400) / 3600);
@@ -637,7 +656,6 @@ class NasGraphCard extends HTMLElement {
     const forced = (this._config.storage_unit ?? 'auto').toUpperCase();
     if (forced === 'TB') return `${(bytes / 1e12).toFixed(2)} TB`;
     if (forced === 'GB') return `${(bytes / 1e9).toFixed(2)} GB`;
-    // auto
     if (bytes >= 1e15) return `${(bytes / 1e15).toFixed(2)} PB`;
     if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(2)} TB`;
     if (bytes >= 1e9)  return `${(bytes / 1e9).toFixed(2)} GB`;
@@ -653,12 +671,10 @@ class NasGraphCard extends HTMLElement {
     const deviceId = this._config.device ? this._resolveDeviceId(this._config.device) : null;
     if (!deviceId || !this._hass.entities) return null;
 
-    // Auto-count per-drive status sensors — handles QNAP smart_status, Synology disk_status, etc.
     const drives = Object.entries(this._hass.entities).filter(([eid, info]) => {
       if (info.device_id !== deviceId) return false;
       const id = eid.toLowerCase();
       return (
-        // QNAP: sensor.xxx_drive_1_smart_status / disk_1_temperature etc.
         /drive_\d+|disk_\d+|hdd_\d+|ssd_\d+/.test(id) &&
         _has(id, 'smart', 'health', 'status', 'condition')
       ) || (
@@ -675,79 +691,159 @@ class NasGraphCard extends HTMLElement {
 
   // ── Cursor helper ─────────────────────────────────────────────────────────
   _cursor(key, entityId) {
-    const tap = this._config.actions?.[key]?.tap_action ?? { action: entityId ? 'more-info' : 'none' };
+    const defTap = HISTORY_KEYS.has(key) && entityId ? { action: 'navigate' } : { action: entityId ? 'more-info' : 'none' };
+    const tap = this._config.actions?.[key]?.tap_action ?? defTap;
     return tap.action !== 'none' ? 'pointer' : 'default';
+  }
+
+  // ── Smart render: only rebuild DOM when structure changes ─────────────────
+  _needsFullRender(topDefs, midDefs, hasDiskStats, hasStorage, hasUptime) {
+    if (!this.shadowRoot.querySelector('ha-card')) return true;
+    const key = JSON.stringify([
+      this._config.theme,
+      this._config.brand,
+      (this._config.exclude_sections || []).slice().sort().join(','),
+      topDefs.map(m => m.key).join(','),
+      midDefs.map(m => m.key).join(','),
+      hasDiskStats,
+      hasStorage,
+      hasUptime,
+    ]);
+    if (key !== this._renderKey) { this._renderKey = key; return true; }
+    return false;
+  }
+
+  // ── In-place value patch (called when structure hasn't changed) ───────────
+  _patchValues(isFuturistic, cv, topDefs, midDefs) {
+    const sr = this.shadowRoot;
+
+    // Online status dot + text
+    const dot = sr.querySelector('.dot');
+    if (dot) {
+      dot.style.background = cv.online ? '#22c55e' : '#ef4444';
+      dot.style.boxShadow  = isFuturistic && cv.online
+        ? '0 0 7px #22c55e,0 0 14px rgba(34,197,94,0.35)' : 'none';
+    }
+    const statusText = sr.querySelector('.status-text');
+    if (statusText) statusText.textContent = cv.online ? 'Online' : 'Offline';
+
+    // Top tiles
+    for (const m of topDefs) {
+      const tile = sr.querySelector(`[data-action="${m.key}"]`);
+      if (!tile) continue;
+      const gaugeEl = tile.querySelector('.tile-gauge');
+      if (gaugeEl) {
+        gaugeEl.innerHTML = gaugeSVG(m.val / (m.max || 100), m.colors.spark, m.label, `${m.val}${m.unit}`, 108);
+      }
+      const valEl = tile.querySelector('.tile-val');
+      if (valEl) {
+        valEl.innerHTML = `${m.val}<span style="font-size:14px;font-weight:400;opacity:.8;">${m.unit}</span>`;
+      }
+      const sparkEl = tile.querySelector('.tile-spark');
+      if (sparkEl) {
+        const w = gaugeEl ? 120 : 200, h = gaugeEl ? 24 : 36;
+        sparkEl.innerHTML = sparkSVG(this._history[m.key] || [m.val], m.colors.spark, w, h);
+      }
+    }
+
+    // Mid tiles
+    for (const m of midDefs) {
+      const tile = sr.querySelector(`[data-action="${m.key}"]`);
+      if (!tile) continue;
+      const valEl = tile.querySelector('.tile-val');
+      if (valEl) valEl.textContent = this._fmtFlow(m.key);
+      const sparkEl = tile.querySelector('.tile-spark');
+      if (sparkEl) sparkEl.innerHTML = sparkSVG(this._history[m.key] || [0], m.colors.spark, 120, 26);
+    }
+
+    // Bottom row values
+    const disksEl = sr.querySelector('[data-action="disks_healthy"] .bot-val');
+    if (disksEl && cv.diskStats) disksEl.textContent = `${cv.diskStats.healthy}/${cv.diskStats.total}`;
+
+    const storageEl = sr.querySelector('[data-action="storage_free"] .bot-val');
+    if (storageEl && cv.storageFmt) storageEl.textContent = cv.storageFmt;
+
+    const uptimeEl = sr.querySelector('[data-action="uptime"] .bot-val');
+    if (uptimeEl && cv.uptimeFmt) uptimeEl.textContent = cv.uptimeFmt;
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
   _render() {
     const cfg          = this._config;
     const isFuturistic = (cfg.theme || 'standard') === 'futuristic';
-    const brand        = (cfg.brand  || 'qnap').toLowerCase();
-    const online       = this._isOnline();
-    const excluded     = new Set(cfg.exclude_sections ?? []);
-
-    const tileBg     = isFuturistic ? 'rgba(0,0,0,0.30)' : 'rgba(0,0,0,0.20)';
-    const tileBorder = isFuturistic ? 'border:1px solid rgba(60,80,180,0.18);' : '';
 
     const cpuV = parseFloat(this._state('cpu',         '0')) || 0;
     const memV = parseFloat(this._state('memory',      '0')) || 0;
     const tmpV = parseFloat(this._state('temperature', '0')) || 0;
+    const online     = this._isOnline();
+    const diskStats  = this._getDiskStats();
+    const storageFmt = this._fmtStorage();
+    const uptimeFmt  = this._fmtUptime();
 
-    // ── Top row — dynamic, respects visible_metrics ───────────────────────
-    const TOP_DEFS = [
-      { key: 'cpu',         label: 'CPU',        unit: '%',  val: cpuV, max: cfg.max_cpu,    colors: C.cpu         },
-      { key: 'memory',      label: 'Memory',     unit: '%',  val: memV, max: cfg.max_memory, colors: C.memory      },
-      { key: 'temperature', label: 'System Temp',unit: '°C', val: tmpV, max: cfg.max_temp,   colors: C.temperature },
+    const cv = { cpuV, memV, tmpV, online, diskStats, storageFmt, uptimeFmt };
+
+    const topDefs = [
+      { key: 'cpu',         label: 'CPU',         unit: '%',  val: cpuV, max: cfg.max_cpu,    colors: C.cpu         },
+      { key: 'memory',      label: 'Memory',      unit: '%',  val: memV, max: cfg.max_memory, colors: C.memory      },
+      { key: 'temperature', label: 'System Temp', unit: '°C', val: tmpV, max: cfg.max_temp,   colors: C.temperature },
     ].filter(m => this._isVisible(m.key));
 
-    const topCols  = TOP_DEFS.length || 1;
-    const topTiles = TOP_DEFS.map(m => isFuturistic
+    const midDefs = [
+      { key: 'network_in',  label: 'Net In',    colors: C.network_in  },
+      { key: 'network_out', label: 'Net Out',   colors: C.network_out },
+      { key: 'disk_read',   label: 'Disk Read', colors: C.disk_read   },
+      { key: 'disk_write',  label: 'Disk Write',colors: C.disk_write  },
+    ].filter(m => this._resolvedEntities[m.key] && this._isVisible(m.key));
+
+    if (this._needsFullRender(topDefs, midDefs, !!diskStats, !!storageFmt, !!uptimeFmt)) {
+      this._fullRender(cfg, isFuturistic, cv, topDefs, midDefs);
+    } else {
+      this._patchValues(isFuturistic, cv, topDefs, midDefs);
+    }
+  }
+
+  // ── Full DOM rebuild (only when layout/structure changes) ─────────────────
+  _fullRender(cfg, isFuturistic, cv, topDefs, midDefs) {
+    const brand    = (cfg.brand || 'qnap').toLowerCase();
+    const excluded = new Set(cfg.exclude_sections ?? []);
+    const online   = cv.online;
+
+    const tileBg     = isFuturistic ? 'rgba(0,0,0,0.30)' : 'rgba(0,0,0,0.20)';
+    const tileBorder = isFuturistic ? 'border:1px solid rgba(60,80,180,0.18);' : '';
+
+    const topCols  = topDefs.length || 1;
+    const topTiles = topDefs.map(m => isFuturistic
       ? this._gaugeTile(m.val, m.max, m.colors, m.label, m.unit, m.key, tileBg, tileBorder)
       : this._stdTile(m.label, m.val, m.unit, m.colors, m.key, tileBg, tileBorder)
     ).join('');
 
-    // ── Mid row — visible_metrics + entity existence ───────────────────────
-    const MID_METRICS = [
-      { key: 'network_in',  label: 'Net In',    color: C.network_in  },
-      { key: 'network_out', label: 'Net Out',   color: C.network_out },
-      { key: 'disk_read',   label: 'Disk Read', color: C.disk_read   },
-      { key: 'disk_write',  label: 'Disk Write',color: C.disk_write  },
-    ].filter(m => this._resolvedEntities[m.key] && this._isVisible(m.key));
-
-    const midTiles = MID_METRICS.map(m =>
-      this._flowTile(m.label, this._fmtFlow(m.key), m.color, m.key, tileBg, tileBorder, isFuturistic)
+    const midTiles = midDefs.map(m =>
+      this._flowTile(m.label, this._fmtFlow(m.key), m.colors, m.key, tileBg, tileBorder, isFuturistic)
     ).join('');
-    const midCols  = MID_METRICS.length || 2;
-
-    // ── Bottom row ─────────────────────────────────────────────────────────
-    const diskStats  = this._getDiskStats();
-    const storageFmt = this._fmtStorage();
-    const uptimeFmt  = this._fmtUptime();
+    const midCols  = midDefs.length || 2;
 
     const disksEid   = this._resolvedEntities.disks_healthy || '';
     const storageEid = this._resolvedEntities.storage_free  || '';
     const uptimeEid  = this._resolvedEntities.uptime        || '';
 
     const botItems = [
-      diskStats  && this._isVisible('disks_healthy') ? `
+      cv.diskStats  && this._isVisible('disks_healthy') ? `
         <div class="bot-item" data-action="disks_healthy" data-entity="${disksEid}" style="cursor:${this._cursor('disks_healthy',disksEid)}">
           <span class="bot-ico">💿</span>
-          <div><div class="bot-lbl">Disks</div><div class="bot-val">${diskStats.healthy}/${diskStats.total}</div><div class="bot-sub">Healthy</div></div>
+          <div><div class="bot-lbl">Disks</div><div class="bot-val">${cv.diskStats.healthy}/${cv.diskStats.total}</div><div class="bot-sub">Healthy</div></div>
         </div>` : '',
-      storageFmt && this._isVisible('storage_free') ? `
+      cv.storageFmt && this._isVisible('storage_free') ? `
         <div class="bot-item" data-action="storage_free" data-entity="${storageEid}" style="cursor:${this._cursor('storage_free',storageEid)}">
           <span class="bot-ico">🗄️</span>
-          <div><div class="bot-lbl">Storage</div><div class="bot-val">${storageFmt}</div><div class="bot-sub">Free</div></div>
+          <div><div class="bot-lbl">Storage</div><div class="bot-val">${cv.storageFmt}</div><div class="bot-sub">Free</div></div>
         </div>` : '',
-      uptimeFmt && this._isVisible('uptime') ? `
+      cv.uptimeFmt && this._isVisible('uptime') ? `
         <div class="bot-item" data-action="uptime" data-entity="${uptimeEid}" style="cursor:${this._cursor('uptime',uptimeEid)}">
           <span class="bot-ico">⏱️</span>
-          <div><div class="bot-lbl">Uptime</div><div class="bot-val">${uptimeFmt}</div><div class="bot-sub">Up</div></div>
+          <div><div class="bot-lbl">Uptime</div><div class="bot-val">${cv.uptimeFmt}</div><div class="bot-sub">Up</div></div>
         </div>` : '',
     ].filter(Boolean).join('');
 
-    // ── styles.card injection ──────────────────────────────────────────────
     const cardStyles = cfg.styles?.card
       ? Object.entries(cfg.styles.card).map(([k, v]) => `${k}:${v};`).join('') : '';
 
@@ -787,7 +883,7 @@ class NasGraphCard extends HTMLElement {
             ${ICONS[brand] ?? ICONS.generic}
             <div class="hdr-text">
               <div class="hdr-name">${cfg.name || 'NAS'}</div>
-              <div class="hdr-status"><div class="dot"></div><span>${online ? 'Online' : 'Offline'}</span></div>
+              <div class="hdr-status"><div class="dot"></div><span class="status-text">${online ? 'Online' : 'Offline'}</span></div>
             </div>
           </div>` : ''}
           ${!excluded.has('top') && topTiles ? `<div class="top-grid">${topTiles}</div>` : ''}
@@ -803,8 +899,8 @@ class NasGraphCard extends HTMLElement {
     const spark    = sparkSVG(this._history[key] || [value], colors.spark, 200, 36);
     return `<div data-action="${key}" data-entity="${entityId}" style="background:${bg};${border}border-radius:12px;padding:12px;overflow:hidden;cursor:${this._cursor(key,entityId)};">
       <div style="font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:${colors.label};margin-bottom:4px;">${label}</div>
-      <div style="font-size:28px;font-weight:700;line-height:1.1;margin-bottom:8px;">${value}<span style="font-size:14px;font-weight:400;opacity:.8;">${unit}</span></div>
-      <div style="line-height:0;">${spark}</div>
+      <div class="tile-val" style="font-size:28px;font-weight:700;line-height:1.1;margin-bottom:8px;">${value}<span style="font-size:14px;font-weight:400;opacity:.8;">${unit}</span></div>
+      <div class="tile-spark" style="line-height:0;">${spark}</div>
     </div>`;
   }
 
@@ -813,8 +909,8 @@ class NasGraphCard extends HTMLElement {
     const gauge    = gaugeSVG(value / (max || 100), colors.spark, label, `${value}${unit}`, 108);
     const spark    = sparkSVG(this._history[key] || [value], colors.spark, 120, 24);
     return `<div data-action="${key}" data-entity="${entityId}" style="background:${bg};${border}border-radius:12px;padding:10px 8px 8px;display:flex;flex-direction:column;align-items:center;overflow:hidden;cursor:${this._cursor(key,entityId)};">
-      ${gauge}
-      <div style="width:100%;line-height:0;margin-top:4px;">${spark}</div>
+      <div class="tile-gauge">${gauge}</div>
+      <div class="tile-spark" style="width:100%;line-height:0;margin-top:4px;">${spark}</div>
     </div>`;
   }
 
@@ -824,8 +920,8 @@ class NasGraphCard extends HTMLElement {
     const glow     = isFuturistic ? `text-shadow:0 0 8px ${colors.label};` : '';
     return `<div data-action="${key}" data-entity="${entityId}" style="background:${bg};${border}border-radius:10px;padding:9px 10px;overflow:hidden;cursor:${this._cursor(key,entityId)};">
       <div style="font-size:10px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:${colors.label};${glow}margin-bottom:3px;">${label}</div>
-      <div style="font-size:13px;font-weight:700;margin-bottom:5px;white-space:nowrap;">${value}</div>
-      <div style="line-height:0;">${spark}</div>
+      <div class="tile-val" style="font-size:13px;font-weight:700;margin-bottom:5px;white-space:nowrap;">${value}</div>
+      <div class="tile-spark" style="line-height:0;">${spark}</div>
     </div>`;
   }
 
