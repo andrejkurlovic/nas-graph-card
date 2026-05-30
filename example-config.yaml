@@ -7,7 +7,7 @@
 # belonging to that device and maps them automatically.
 type: custom:nas-graph-card
 name: QNAP
-brand: qnap          # qnap | synology | server | desktop | container | raspberry_pi | generic
+brand: qnap          # qnap | synology | beszel | server | desktop | container | raspberry_pi | generic
 theme: standard      # standard | futuristic
 device: "My QNAP NAS"  # device name as shown in HA Settings → Devices
 max_cpu: 100
@@ -56,6 +56,36 @@ name: Home Server
 brand: server        # changes the icon; layout stays the same
 theme: futuristic
 device: "My Home Server"  # any HA device with CPU/memory/network sensors
+
+---
+
+# ── 5. BESZEL (auto-discovery) ──────────────────────────────────
+# The card auto-discovers Beszel sensor names: network_receive,
+# network_send, disk_read, disk_write, uptime (in minutes).
+type: custom:nas-graph-card
+name: My Beszel Server
+brand: beszel
+theme: futuristic
+device: "My Beszel System"  # device name from Settings → Devices
+
+---
+
+# ── 6. BESZEL (manual — all entities) ───────────────────────────
+# Use when auto-discovery doesn't find the right sensors.
+type: custom:nas-graph-card
+name: My Beszel Server
+brand: beszel
+theme: standard
+entities:
+  status:        binary_sensor.myserver_status
+  cpu:           sensor.myserver_cpu
+  memory:        sensor.myserver_ram
+  temperature:   sensor.myserver_temperature
+  network_in:    sensor.myserver_network_receive
+  network_out:   sensor.myserver_network_send
+  disk_read:     sensor.myserver_disk_read
+  disk_write:    sensor.myserver_disk_write
+  uptime:        sensor.myserver_uptime
 
 # ─────────────────────────────────────────────────────────────────
 # FROSTED GLASS

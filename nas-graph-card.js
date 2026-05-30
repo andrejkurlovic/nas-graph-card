@@ -1,7 +1,7 @@
 /**
- * NAS Graph Card for Home Assistant  v1.5.0
+ * NAS Graph Card for Home Assistant  v2.0.0
  * Works with any device that exposes sensors: NAS, server, desktop,
- * container, Raspberry Pi, etc.
+ * container, Raspberry Pi, Beszel — and more.
  *
  * Themes: standard | futuristic
  * Frosted glass is handled by the active HA theme — the card never
@@ -9,7 +9,7 @@
  * https://github.com/andrejkurlovic/nas-graph-card
  */
 
-const VERSION = '1.5.0';
+const VERSION = '2.0.0';
 const MAX_HISTORY = 30;
 
 // ── Metric colour palette ───────────────────────────────────────────────────
@@ -28,13 +28,15 @@ let _uid = 0;
 const uid = () => `n${++_uid}`;
 
 // ── Sparkline SVG ───────────────────────────────────────────────────────────
-function sparkSVG(data, strokeColor, w = 200, h = 36) {
+// loading=true → dashed placeholder while waiting for HA history API response
+function sparkSVG(data, strokeColor, w = 200, h = 36, loading = false) {
   const id = uid();
   const pad = 2;
-  if (!data || data.length < 2) {
+  if (loading || !data || data.length < 2) {
     const y = h / 2;
     return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
-      <line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="${strokeColor}" stroke-width="1.5" stroke-opacity="0.3"/>
+      <line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="${strokeColor}" stroke-width="1.5"
+        stroke-opacity="${loading ? 0.15 : 0.3}" stroke-dasharray="${loading ? '4 3' : 'none'}"/>
     </svg>`;
   }
   const min = Math.min(...data), max = Math.max(...data), range = max - min;
@@ -149,6 +151,18 @@ const ICONS = {
     <circle cx="23" cy="23" r="4" fill="#c00" opacity="0.8"/>
     <circle cx="23" cy="23" r="1.5" fill="#ff4444"/>
   </svg>`,
+  // Beszel — live sparkline chart aesthetic
+  beszel: `<svg width="46" height="46" viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="3" y="3" width="40" height="40" rx="5" fill="#0a1628" stroke="#1e3a5f" stroke-width="1.3"/>
+    <line x1="7" y1="15" x2="39" y2="15" stroke="#1a3050" stroke-width="0.8"/>
+    <line x1="7" y1="24" x2="39" y2="24" stroke="#1a3050" stroke-width="0.8"/>
+    <line x1="7" y1="33" x2="39" y2="33" stroke="#1a3050" stroke-width="0.8"/>
+    <polyline points="7,30 12,23 17,26 22,17 27,21 31,13 36,17 39,11"
+      stroke="#06b6d4" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="39" cy="11" r="3" fill="#06b6d4"/>
+    <circle cx="39" cy="11" r="5.5" fill="#06b6d4" opacity="0.18"/>
+  </svg>`,
+
   generic: `<svg width="46" height="46" viewBox="0 0 46 46" fill="none" xmlns="http://www.w3.org/2000/svg">
     <rect x="5" y="10" width="36" height="26" rx="4" fill="#162030" stroke="#2a4055" stroke-width="1.2"/>
     <circle cx="23" cy="23" r="8" fill="#1d3048" stroke="#304a65" stroke-width="1"/>
@@ -162,19 +176,25 @@ const ICONS = {
 };
 
 // ── Entity auto-discovery matchers ───────────────────────────────────────────
-const _isFlow    = u => /[KMGT]?B\/s|bps/i.test(u);
+const _isFlow    = u => /[KMGT]?B\/s|bps|bit\/s/i.test(u);
 const _isStorage = u => /^[KMGT]?B$/i.test(u);
+// Beszel reports network/disk as per-interval bytes (kB, MB) not per-second rates
+const _isBytes   = u => /^[KMGT]i?B$/i.test(u);
+const _isRate    = u => _isFlow(u) || _isBytes(u);
 const _has       = (id, ...terms) => terms.some(t => id.includes(t));
 
 const MATCHERS = [
   { key: 'cpu',          test: (id, u)     => _has(id, 'cpu') && u === '%' },
   { key: 'memory',       test: (id, u)     => _has(id, 'memory', 'ram') && u === '%' },
   { key: 'temperature',  test: (id, u, dc) => dc === 'temperature' },
-  { key: 'network_in',   test: (id, u)     => _has(id, '_rx', 'net_in', 'download', 'network_in') && _isFlow(u) },
-  { key: 'network_out',  test: (id, u)     => _has(id, '_tx', 'net_out', 'upload', 'network_out') && _isFlow(u) },
-  { key: 'disk_read',    test: (id, u)     => _has(id, 'read', 'disk_r') && _isFlow(u) },
-  { key: 'disk_write',   test: (id, u)     => _has(id, 'write', 'disk_w') && _isFlow(u) },
-  { key: 'storage_free', test: (id, u)     => _has(id, 'free', 'available', 'volume') && _isStorage(u) },
+  // network_in: standard names + Beszel (network_receive, recv)
+  { key: 'network_in',   test: (id, u) => _has(id, '_rx','net_in','download','network_in','network_receive','recv') && _isRate(u) },
+  // network_out: standard names + Beszel (network_send, _send)
+  { key: 'network_out',  test: (id, u) => _has(id, '_tx','net_out','upload','network_out','network_send','_send') && _isRate(u) },
+  // disk I/O: explicit disk_read / disk_write names for Beszel
+  { key: 'disk_read',    test: (id, u) => _has(id, 'disk_read','disk_r','_read') && _isRate(u) && !_has(id,'write') },
+  { key: 'disk_write',   test: (id, u) => _has(id, 'disk_write','disk_w','_write') && _isRate(u) && !_has(id,'read') },
+  { key: 'storage_free', test: (id, u) => _has(id, 'free', 'available', 'volume') && _isStorage(u) },
   { key: 'uptime',       test: (id, u, dc) => _has(id, 'uptime', 'up_time', 'boot') || dc === 'duration' },
   { key: 'disks_total',  test: (id, u)     => _has(id, 'disk', 'drive') && _has(id, 'total', 'count') },
   { key: 'disks_healthy',test: (id, u)     => _has(id, 'disk', 'drive') && _has(id, 'healthy', 'good', 'normal', 'ready') },
@@ -190,6 +210,7 @@ const EDITOR_SCHEMA = [
     selector: { select: { options: [
       { value: 'qnap',         label: 'QNAP NAS'       },
       { value: 'synology',     label: 'Synology NAS'   },
+      { value: 'beszel',       label: 'Beszel'         },
       { value: 'server',       label: 'Server'         },
       { value: 'desktop',      label: 'Desktop / PC'   },
       { value: 'container',    label: 'Container'      },
@@ -382,6 +403,7 @@ class NasGraphCard extends HTMLElement {
     super();
     this.attachShadow({ mode: 'open' });
     this._history          = {};
+    this._historyReady     = {};  // key → true once API has returned data
     this._config           = {};
     this._hass             = null;
     this._resolvedEntities = {};
@@ -480,8 +502,9 @@ class NasGraphCard extends HTMLElement {
     };
     if (String(config.history_hours ?? '1') !== String(prevHours ?? '')) {
       this._lastHistoryFetch = 0;
-      this._history = {};
-      this._renderKey = null;
+      this._history      = {};
+      this._historyReady = {};
+      this._renderKey    = null;
     }
   }
 
@@ -518,7 +541,12 @@ class NasGraphCard extends HTMLElement {
         const key = NUMERIC.find(k => this._resolvedEntities[k] === eid);
         if (!key) continue;
         const vals = hist.map(s => parseFloat(s.state)).filter(v => !isNaN(v));
-        if (vals.length) this._history[key] = this._resample(vals, MAX_HISTORY);
+        if (!vals.length) continue;
+        // Merge: resample API data into the buffer front, keep any live tail
+        const live    = this._history[key] ?? [];
+        const resampled = this._resample(vals, MAX_HISTORY - live.length);
+        this._history[key]      = [...resampled, ...live].slice(-MAX_HISTORY);
+        this._historyReady[key] = true;
       }
       this._render();
     } catch (_) { /* fall back to in-memory */ } finally {
@@ -614,14 +642,18 @@ class NasGraphCard extends HTMLElement {
     const v = parseFloat(this._state(key, '0'));
     if (isNaN(v)) return '—';
     const u = this._unit(key);
-    if (u === 'MB/s') return `${v.toFixed(1)} MB/s`;
-    if (u === 'KB/s') return `${v >= 100 ? Math.round(v) : v.toFixed(1)} KB/s`;
-    if (u === 'GB/s') return `${v.toFixed(2)} GB/s`;
-    if (u === 'B/s' || u === 'bytes/s') {
+    if (/MB\/s|MiB\/s/i.test(u))    return `${v.toFixed(1)} MB/s`;
+    if (/[Kk]B\/s|KiB\/s/i.test(u)) return `${v >= 100 ? Math.round(v) : v.toFixed(1)} KB/s`;
+    if (/GB\/s/i.test(u))            return `${v.toFixed(2)} GB/s`;
+    if (/^B\/s$|^bytes\/s$/i.test(u)) {
       if (v >= 1_048_576) return `${(v / 1_048_576).toFixed(1)} MB/s`;
       if (v >= 1_024)     return `${(v / 1_024).toFixed(1)} KB/s`;
       return `${Math.round(v)} B/s`;
     }
+    // Beszel: per-interval bytes — kB or MB per poll window (not a rate)
+    if (/^[Kk]B$/.test(u)) return v >= 1024 ? `${(v / 1024).toFixed(1)} MB` : `${Math.round(v)} kB`;
+    if (/^MB$/i.test(u))   return `${v.toFixed(2)} MB`;
+    if (/^GB$/i.test(u))   return `${v.toFixed(3)} GB`;
     return `${v.toFixed(1)}${u ? ' ' + u : ''}`;
   }
 
@@ -742,7 +774,7 @@ class NasGraphCard extends HTMLElement {
       const sparkEl = tile.querySelector('.tile-spark');
       if (sparkEl) {
         const w = gaugeEl ? 120 : 200, h = gaugeEl ? 24 : 36;
-        sparkEl.innerHTML = sparkSVG(this._history[m.key] || [m.val], m.colors.spark, w, h);
+        sparkEl.innerHTML = sparkSVG(this._history[m.key], m.colors.spark, w, h, !this._historyReady[m.key]);
       }
     }
 
@@ -753,7 +785,7 @@ class NasGraphCard extends HTMLElement {
       const valEl = tile.querySelector('.tile-val');
       if (valEl) valEl.textContent = this._fmtFlow(m.key);
       const sparkEl = tile.querySelector('.tile-spark');
-      if (sparkEl) sparkEl.innerHTML = sparkSVG(this._history[m.key] || [0], m.colors.spark, 120, 26);
+      if (sparkEl) sparkEl.innerHTML = sparkSVG(this._history[m.key], m.colors.spark, 120, 26, !this._historyReady[m.key]);
     }
 
     // Bottom row values
@@ -896,7 +928,8 @@ class NasGraphCard extends HTMLElement {
   // ── Tile builders ─────────────────────────────────────────────────────────
   _stdTile(label, value, unit, colors, key, bg, border) {
     const entityId = this._resolvedEntities[key] || '';
-    const spark    = sparkSVG(this._history[key] || [value], colors.spark, 200, 36);
+    const loading  = !this._historyReady[key];
+    const spark    = sparkSVG(this._history[key], colors.spark, 200, 36, loading);
     return `<div data-action="${key}" data-entity="${entityId}" style="background:${bg};${border}border-radius:12px;padding:12px;overflow:hidden;cursor:${this._cursor(key,entityId)};">
       <div style="font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:${colors.label};margin-bottom:4px;">${label}</div>
       <div class="tile-val" style="font-size:28px;font-weight:700;line-height:1.1;margin-bottom:8px;">${value}<span style="font-size:14px;font-weight:400;opacity:.8;">${unit}</span></div>
@@ -906,8 +939,9 @@ class NasGraphCard extends HTMLElement {
 
   _gaugeTile(value, max, colors, label, unit, key, bg, border) {
     const entityId = this._resolvedEntities[key] || '';
+    const loading  = !this._historyReady[key];
     const gauge    = gaugeSVG(value / (max || 100), colors.spark, label, `${value}${unit}`, 108);
-    const spark    = sparkSVG(this._history[key] || [value], colors.spark, 120, 24);
+    const spark    = sparkSVG(this._history[key], colors.spark, 120, 24, loading);
     return `<div data-action="${key}" data-entity="${entityId}" style="background:${bg};${border}border-radius:12px;padding:10px 8px 8px;display:flex;flex-direction:column;align-items:center;overflow:hidden;cursor:${this._cursor(key,entityId)};">
       <div class="tile-gauge">${gauge}</div>
       <div class="tile-spark" style="width:100%;line-height:0;margin-top:4px;">${spark}</div>
@@ -916,7 +950,8 @@ class NasGraphCard extends HTMLElement {
 
   _flowTile(label, value, colors, key, bg, border, isFuturistic) {
     const entityId = this._resolvedEntities[key] || '';
-    const spark    = sparkSVG(this._history[key] || [0], colors.spark, 120, 26);
+    const loading  = !this._historyReady[key];
+    const spark    = sparkSVG(this._history[key], colors.spark, 120, 26, loading);
     const glow     = isFuturistic ? `text-shadow:0 0 8px ${colors.label};` : '';
     return `<div data-action="${key}" data-entity="${entityId}" style="background:${bg};${border}border-radius:10px;padding:9px 10px;overflow:hidden;cursor:${this._cursor(key,entityId)};">
       <div style="font-size:10px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:${colors.label};${glow}margin-bottom:3px;">${label}</div>
