@@ -672,8 +672,9 @@ class NasGraphCard extends HTMLElement {
     const d = Math.floor(secs / 86400);
     const h = Math.floor((secs % 86400) / 3600);
     const m = Math.floor((secs % 3600) / 60);
-    if (d > 0) return `${d}d ${h}h`;
-    if (h > 0) return `${h}h ${m}m`;
+    // Suppress trailing zero components: "1d" not "1d 0h", "2h" not "2h 0m"
+    if (d > 0) return h > 0 ? `${d}d ${h}h` : `${d}d`;
+    if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
     return `${m}m`;
   }
 
@@ -814,10 +815,15 @@ class NasGraphCard extends HTMLElement {
 
     const cv = { cpuV, memV, tmpV, online, diskStats, storageFmt, uptimeFmt };
 
+    // Read the actual unit from the sensor — auto-detects °F vs °C
+    const tempUnit = this._unit('temperature') || '°C';
+    // When using the default max_temp (80) with a °F sensor, scale to 176°F automatically
+    const tempMax  = (tempUnit === '°F' && (cfg.max_temp === 80 || !cfg.max_temp)) ? 176 : (cfg.max_temp || 80);
+
     const topDefs = [
-      { key: 'cpu',         label: 'CPU',         unit: '%',  val: cpuV, max: cfg.max_cpu,    colors: C.cpu         },
-      { key: 'memory',      label: 'Memory',      unit: '%',  val: memV, max: cfg.max_memory, colors: C.memory      },
-      { key: 'temperature', label: 'System Temp', unit: '°C', val: tmpV, max: cfg.max_temp,   colors: C.temperature },
+      { key: 'cpu',         label: 'CPU',         unit: '%',      val: cpuV, max: cfg.max_cpu,    colors: C.cpu         },
+      { key: 'memory',      label: 'Memory',      unit: '%',      val: memV, max: cfg.max_memory, colors: C.memory      },
+      { key: 'temperature', label: 'System Temp', unit: tempUnit, val: tmpV, max: tempMax,        colors: C.temperature },
     ].filter(m => this._isVisible(m.key));
 
     const midDefs = [
