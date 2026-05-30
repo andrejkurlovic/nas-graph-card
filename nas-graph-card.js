@@ -9,7 +9,7 @@
  * https://github.com/andrejkurlovic/nas-graph-card
  */
 
-const VERSION = '2.0.1';
+const VERSION = '2.0.2';
 const MAX_HISTORY = 30;
 
 // ── Metric colour palette ───────────────────────────────────────────────────
@@ -228,7 +228,8 @@ const EDITOR_SCHEMA = [
   { name: 'device',     label: 'HA Device (auto-discovers sensors)',  selector: { device: {} } },
   { name: 'max_cpu',    label: 'CPU gauge max (%)',    selector: { number: { min: 1, max: 200, step: 1, mode: 'box' } } },
   { name: 'max_memory', label: 'Memory gauge max (%)', selector: { number: { min: 1, max: 200, step: 1, mode: 'box' } } },
-  { name: 'max_temp',   label: 'Temp gauge max (°)',   selector: { number: { min: 1, max: 150, step: 1, mode: 'box' } } },
+  { name: 'max_temp',   label: 'Temp gauge max (°)',   selector: { number: { min: 1, max: 300, step: 1, mode: 'box' } } },
+  { name: 'temperature_fahrenheit', label: 'Temperature sensor reports in °F (convert to °C)', selector: { boolean: {} } },
   {
     name: 'visible_metrics', label: 'Visible metrics (blank = show all with sensors)',
     selector: { select: { multiple: true, options: [
@@ -492,6 +493,7 @@ class NasGraphCard extends HTMLElement {
       max_cpu:          100,
       max_memory:       100,
       max_temp:         80,
+      temperature_fahrenheit: false,
       history_hours:    '1',
       storage_unit:     'auto',
       visible_metrics:  [],
@@ -805,20 +807,21 @@ class NasGraphCard extends HTMLElement {
     const cfg          = this._config;
     const isFuturistic = (cfg.theme || 'standard') === 'futuristic';
 
-    const cpuV = parseFloat(this._state('cpu',         '0')) || 0;
-    const memV = parseFloat(this._state('memory',      '0')) || 0;
-    const tmpV = parseFloat(this._state('temperature', '0')) || 0;
+    const cpuV = parseFloat(this._state('cpu',    '0')) || 0;
+    const memV = parseFloat(this._state('memory', '0')) || 0;
     const online     = this._isOnline();
     const diskStats  = this._getDiskStats();
     const storageFmt = this._fmtStorage();
     const uptimeFmt  = this._fmtUptime();
 
-    const cv = { cpuV, memV, tmpV, online, diskStats, storageFmt, uptimeFmt };
-
-    // Read the actual unit from the sensor — auto-detects °F vs °C
-    const tempUnit = this._unit('temperature') || '°C';
-    // When using the default max_temp (80) with a °F sensor, scale to 176°F automatically
+    // temperature_fahrenheit: sensor reports °F — convert to °C for display
+    const convertF = !!cfg.temperature_fahrenheit;
+    const rawTmpV  = parseFloat(this._state('temperature', '0')) || 0;
+    const tmpV     = convertF ? Math.round(((rawTmpV - 32) * 5 / 9) * 10) / 10 : rawTmpV;
+    const tempUnit = convertF ? '°C' : (this._unit('temperature') || '°C');
     const tempMax  = (tempUnit === '°F' && (cfg.max_temp === 80 || !cfg.max_temp)) ? 176 : (cfg.max_temp || 80);
+
+    const cv = { cpuV, memV, tmpV, online, diskStats, storageFmt, uptimeFmt };
 
     const topDefs = [
       { key: 'cpu',         label: 'CPU',         unit: '%',      val: cpuV, max: cfg.max_cpu,    colors: C.cpu         },
