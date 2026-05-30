@@ -9,7 +9,7 @@
  * https://github.com/andrejkurlovic/nas-graph-card
  */
 
-const VERSION = '2.0.0';
+const VERSION = '2.0.1';
 const MAX_HISTORY = 30;
 
 // ── Metric colour palette ───────────────────────────────────────────────────
@@ -196,7 +196,7 @@ const MATCHERS = [
   { key: 'disk_write',   test: (id, u) => _has(id, 'disk_write','disk_w','_write') && _isRate(u) && !_has(id,'read') },
   { key: 'storage_free', test: (id, u) => _has(id, 'free', 'available', 'volume') && _isStorage(u) },
   { key: 'uptime',       test: (id, u, dc) => _has(id, 'uptime', 'up_time', 'boot') || dc === 'duration' },
-  { key: 'disks_total',  test: (id, u)     => _has(id, 'disk', 'drive') && _has(id, 'total', 'count') },
+  { key: 'disks_total',  test: (id, u)     => _has(id, 'disk', 'drive') && _has(id, 'total', 'count') && !_isStorage(u) },
   { key: 'disks_healthy',test: (id, u)     => _has(id, 'disk', 'drive') && _has(id, 'healthy', 'good', 'normal', 'ready') },
   { key: 'status',       test: (id, u, dc) => id.startsWith('binary_sensor.') && _has(id, 'online', 'status', 'connected', 'running') },
 ];
@@ -824,7 +824,7 @@ class NasGraphCard extends HTMLElement {
       { key: 'cpu',         label: 'CPU',         unit: '%',      val: cpuV, max: cfg.max_cpu,    colors: C.cpu         },
       { key: 'memory',      label: 'Memory',      unit: '%',      val: memV, max: cfg.max_memory, colors: C.memory      },
       { key: 'temperature', label: 'System Temp', unit: tempUnit, val: tmpV, max: tempMax,        colors: C.temperature },
-    ].filter(m => this._isVisible(m.key));
+    ].filter(m => (m.key !== 'temperature' || !!this._resolvedEntities.temperature) && this._isVisible(m.key));
 
     const midDefs = [
       { key: 'network_in',  label: 'Net In',    colors: C.network_in  },
